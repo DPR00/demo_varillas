@@ -1,0 +1,17 @@
+imgs/
+output_media/
+frames/
+varillas_train/
+media/complete/
+board/
+**/__pycache__/
+env/
+dataset/
+logger/
+media/demo
+media/full
+output/
+runs/
+old/
+storage/
+contadorV_gr2/
