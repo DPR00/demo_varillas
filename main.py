@@ -156,7 +156,7 @@ if __name__ == "__main__":
         # cv2.circle(roi_frame, (actuator_pos[0], actuator_pos[1]), 10, (0,0,255), -1)
 
         sorted_center_points_cur_frame = sorted(center_points_cur_frame, key = lambda point: point.pos_x)
-        sorted_center_points_cur_frame = sorted_center_points_cur_frame[::-1]
+        sorted_center_points_cur_frame.reverse()
         actuator_moving = False #  actuator_pos[1]!= 0 \
                            #and (abs(actuator_pos[1] - actuator_initial_pos[1]) > act_y_init) \
                            #and frame_count > 1
