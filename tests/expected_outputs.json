@@ -1,0 +1,20 @@
+{
+  "image_01.jpg": [
+    {
+      "class_id": 0,
+      "box_xywh": [0.48, 0.63, 0.69, 0.71]
+    }
+  ],
+  "image_02.jpg": [
+    {
+      "class_id": 1,
+      "box_xywh": [0.35, 0.55, 0.40, 0.30]
+    },
+    {
+      "class_id": 0,
+      "class_name": "person",
+      "box_xywh": [0.81, 0.60, 0.15, 0.55]
+    }
+  ],
+  "image_03_empty.jpg": []
+}
