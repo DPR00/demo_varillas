@@ -1,0 +1,44 @@
+# Archivo de configuracion para el contador de varillas
+
+# Configuraciones basicas
+app_name: "Contador de varillas - IA+TECH"
+version: test_varillas_moviendo_como_detenidas
+debug_mode: True
+generate_video: False
+storage_data: False
+
+model: "contador_yolo11n_270725_best.pt"
+input_video: "varillas_moviendo_como_detenidas.mp4"
+logo: "LOGO_CE.png"
+
+folders:
+  models: "models"
+  media: "media"
+  output: "output"
+  assets: "assets"
+  logger: "logger"
+  storage: "storage"
+  imgs: "imgs"
+
+camera:
+  x_init: 1000
+  y_init: 1055
+  roi_width: 1548
+  roi_height: 1105
+  plot_x_offset: 300
+  plot_y_offset: 50
+  counter_init: 300
+  counter_end: 1248
+
+tracker:
+  min_confidence: 0.5
+
+actuator:
+  x_offset: 130
+  y_limit: 700
+  y_init: 35
+  y_finish: 560
+
+test:
+  image: "IMG_ContadorVarillas_00-05-57_7146.png"
+  image2: "IMG_ContadorVarillas_00-05-48_6972.png"
