@@ -1,26 +1,39 @@
-import cv2
+from .datatypes import Rod
 from copy import deepcopy
+from typing import List, Dict, Tuple
+import cv2
+import numpy as np
 
 class Tracker:
-    def __init__(self, center_points_cur_frame, resized_frame, cam_params, debug = False):
-        self.resized_frame = resized_frame
+    def __init__(self,
+                 center_points_cur_frame: List[Rod],
+                 frame: np.ndarray,
+                 cam_params,
+                 debug: bool = False):
+        self.frame = frame
         self.cam_params = cam_params
         self.center_points_cur_frame =  center_points_cur_frame
-        self.points_zone_init = [point for point in center_points_cur_frame if point.pos_x < cam_params.counter_init]
-        self.points_zone_tracking = [point for point in center_points_cur_frame
-                                     if cam_params.counter_end >= point.pos_x >= cam_params.counter_init]
-        self.points_zone_end = [point for point in center_points_cur_frame if point.pos_x > cam_params.counter_end]
         self.debug = debug
+        self.points_zone_init, self.points_zone_tracking, self.points_zone_end = self._zone_rods(self.center_points_cur_frame)
+
+    def _zone_rods(self, rods: List[Rod]) -> Tuple[List[Rod], List[Rod], List[Rod]]:
+        """
+        Sorts a list of points into three spatial zones based on their x-coordinate.
+
+        Returns:
+            A tuple containing three lists of points for the init, tracking, and end zones.
+        """
+        zone_init = [rod for rod in rods if rod.pos_x < self.cam_params.counter_init]
+        zone_tracking = [rod for rod in rods if self.cam_params.counter_init <= rod.pos_x <= self.cam_params.counter_end]
+        zone_end = [rod for rod in rods if rod.pos_x > self.cam_params.counter_end]
+
+        return zone_init, zone_tracking, zone_end
 
     def update_params(self, track_id, tracking_objects, center_points_prev_frame):
         self.track_id = track_id
         self.tracking_objects = tracking_objects
-        self.points_zone_init_prev = [point for point in center_points_prev_frame \
-                                      if point.pos_x < self.cam_params.counter_init]
-        self.points_zone_tracking_prev = [point for point in center_points_prev_frame \
-                                          if self.cam_params.counter_end >= point.pos_x >= self.cam_params.counter_init]
-        self.points_zone_end_prev = [point for point in center_points_prev_frame \
-                                     if point.pos_x > self.cam_params.counter_end]
+        self.points_zone_init_prev, self.points_zone_tracking_prev, self.points_zone_end_prev = self._zone_rods(center_points_prev_frame)
+
     def track(self):
         center_points_prev_frame_copy = deepcopy(self.center_points_cur_frame)
 
@@ -116,9 +129,9 @@ class Tracker:
         return self.track_id, self.tracking_objects, center_points_prev_frame_copy
 
     def plot_count(self):
-        cv2.line(self.resized_frame, (self.cam_params.counter_init, 0),
+        cv2.line(self.frame, (self.cam_params.counter_init, 0),
                  (self.cam_params.counter_init, self.cam_params.h), (0, 255, 0), 2)
-        cv2.line(self.resized_frame, (self.cam_params.counter_end, 0),
+        cv2.line(self.frame, (self.cam_params.counter_end, 0),
                  (self.cam_params.counter_end, self.cam_params.h), (0, 0, 255), 2)
 
         if self.debug:
@@ -130,10 +143,10 @@ class Tracker:
                 color = (0, 0, 255)
             elif point.pos_x < self.cam_params.counter_init:
                 color = (255, 0, 0)
-            cv2.circle(self.resized_frame, (point.pos_x, point.pos_y), 10, color, -1)
+            cv2.circle(self.frame, (point.pos_x, point.pos_y), 10, color, -1)
 
         for object_id, point in self.tracking_objects.items():
-            cv2.putText(self.resized_frame, str(object_id), (point.pos_x, point.pos_y - 7),
+            cv2.putText(self.frame, str(object_id), (point.pos_x, point.pos_y - 7),
                         0, 1, (0, 0, 0), 2)
 
         text = f"Varillas: {self.track_id - 1}"
@@ -148,6 +161,6 @@ class Tracker:
         text_y = 30  # 10 pixels from the top edge
 
         # Put the text on the image
-        cv2.putText(self.resized_frame, text, (text_x, text_y), self.cam_params.font,
+        cv2.putText(self.frame, text, (text_x, text_y), self.cam_params.font,
                     self.cam_params.font_scale, self.cam_params.text_color,
                     self.cam_params.font_thickness)
