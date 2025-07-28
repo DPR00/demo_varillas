@@ -11,7 +11,7 @@ class Tracker:
                  cam_params,
                  debug: bool = False):
         self.frame = frame
-        self.cam_params = cam_params
+        self.cp = cam_params
         self.center_points_cur_frame =  center_points_cur_frame
         self.debug = debug
         self.points_zone_init, self.points_zone_tracking, self.points_zone_end = self._zone_rods(self.center_points_cur_frame)
@@ -23,9 +23,9 @@ class Tracker:
         Returns:
             A tuple containing three lists of points for the init, tracking, and end zones.
         """
-        zone_init = [rod for rod in rods if rod.pos_x < self.cam_params.counter_init]
-        zone_tracking = [rod for rod in rods if self.cam_params.counter_init <= rod.pos_x <= self.cam_params.counter_end]
-        zone_end = [rod for rod in rods if rod.pos_x > self.cam_params.counter_end]
+        zone_init = [rod for rod in rods if rod.pos_x < self.cp.counter_init]
+        zone_tracking = [rod for rod in rods if self.cp.counter_init <= rod.pos_x <= self.cp.counter_end]
+        zone_end = [rod for rod in rods if rod.pos_x > self.cp.counter_end]
 
         return zone_init, zone_tracking, zone_end
 
@@ -129,38 +129,38 @@ class Tracker:
         return self.track_id, self.tracking_objects, center_points_prev_frame_copy
 
     def plot_count(self):
-        cv2.line(self.frame, (self.cam_params.counter_init, 0),
-                 (self.cam_params.counter_init, self.cam_params.h), (0, 255, 0), 2)
-        cv2.line(self.frame, (self.cam_params.counter_end, 0),
-                 (self.cam_params.counter_end, self.cam_params.h), (0, 0, 255), 2)
+        cv2.line(self.frame, (self.cp.counter_init, 0),
+                 (self.cp.counter_init, self.cp.h), self.cp.green, self.cp.font_thickness)
+        cv2.line(self.frame, (self.cp.counter_end, 0),
+                 (self.cp.counter_end, self.cp.h), self.cp.red, self.cp.font_thickness)
 
         if self.debug:
             print("TO: ", self.tracking_objects)
 
         for point in self.center_points_cur_frame:
-            color = (0, 255, 0)
-            if point.pos_x > self.cam_params.counter_end:
-                color = (0, 0, 255)
-            elif point.pos_x < self.cam_params.counter_init:
-                color = (255, 0, 0)
-            cv2.circle(self.frame, (point.pos_x, point.pos_y), 10, color, -1)
+            color = self.cp.green
+            if point.pos_x > self.cp.counter_end:
+                color = self.cp.red
+            elif point.pos_x < self.cp.counter_init:
+                color = self.cp.blue
+            cv2.circle(self.frame, (point.pos_x, point.pos_y), self.cp.rod_radius, color, -1)
 
         for object_id, point in self.tracking_objects.items():
-            cv2.putText(self.frame, str(object_id), (point.pos_x, point.pos_y - 7),
-                        0, 1, (0, 0, 0), 2)
+            text_pos = (point.pos_x, point.pos_y - 7)
+            cv2.putText(self.frame, str(object_id),text_pos, 0, 1,  self.cp.black, self.cp.font_thickness)
 
         text = f"Varillas: {self.track_id - 1}"
 
         # Get the size of the text
-        (text_width, text_height), _ = cv2.getTextSize(text, self.cam_params.font,
-                                                       self.cam_params.font_scale,
-                                                       self.cam_params.font_thickness)
+        (text_width, text_height), _ = cv2.getTextSize(text, self.cp.font,
+                                                       self.cp.font_scale,
+                                                       self.cp.font_thickness)
 
         # Position the text in the top-right corner
-        text_x = self.cam_params.w - text_width - 10  # 10 pixels from the right edge
+        text_x = self.cp.w - text_width - 10  # 10 pixels from the right edge
         text_y = 30  # 10 pixels from the top edge
 
         # Put the text on the image
-        cv2.putText(self.frame, text, (text_x, text_y), self.cam_params.font,
-                    self.cam_params.font_scale, self.cam_params.text_color,
-                    self.cam_params.font_thickness)
+        cv2.putText(self.frame, text, (text_x, text_y), self.cp.font,
+                    self.cp.font_scale, self.cp.green,
+                    self.cp.font_thickness)
