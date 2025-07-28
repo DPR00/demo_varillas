@@ -61,8 +61,14 @@ class Tracker:
             diffs_tracking = [a.pos_x - b.pos_x for a, b in zip(self.rods_zone_tracking, self.rods_zone_tracking_prev)]
             mean_tracking_move = sum(diffs_tracking) / len(diffs_tracking) if diffs_tracking else 0
 
+            init_diff = len(self.rods_zone_init) - len(self.rods_zone_init_prev)
             end_diff = len(self.rods_zone_end) - len(self.rods_zone_end_prev)
             end_is_stopped = end_diff < 0
+
+            if (len(self.rods_zone_init)== len(self.rods_zone_end_prev) == 0) and (init_diff == end_diff == 0):
+                print("use here")
+                use_standard_association = False
+                return tracking_objects_copy, rods_zone_tracking_copy, use_standard_association
 
             if end_diff == 0 and self.rods_zone_end_prev:
                 diffs_end = [a.pos_x - b.pos_x for a, b in zip(self.rods_zone_end, self.rods_zone_end_prev)]
