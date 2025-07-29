@@ -9,6 +9,8 @@ import time
 take_time = False
 
 if __name__ == "__main__":
+    current_struct_time = time.localtime()
+    timestamp_string = time.strftime("%Y-%m-%d %H:%M:%S", current_struct_time)
     if take_time:
         start_time = time.perf_counter()
 
@@ -23,7 +25,7 @@ if __name__ == "__main__":
     video_path = os.path.join(dir_path, folders_data.get("media"), config_data.get("input_video"))
     logo_path = os.path.join(dir_path, folders_data.get("assets"), config_data.get("logo"))
     logger_path = os.path.join(dir_path, folders_data.get("logger"), config_data.get("version"))
-    output_path = os.path.join(dir_path, folders_data.get("output"), config_data.get("version") + ".mp4")
+    output_path = os.path.join(dir_path, folders_data.get("output"), config_data.get("version") + timestamp_string + ".mp4")
     storage_path = os.path.join(dir_path, folders_data.get("storage"), config_data.get("version"))
 
     # Get components data
@@ -37,7 +39,7 @@ if __name__ == "__main__":
     min_confidence = tracker_data.get("min_confidence")
     x_init, y_init = cam_data.get("x_init"), cam_data.get("y_init")
     roi_width, roi_height = cam_data.get("roi_width"), cam_data.get("roi_height")
-    counter_init, counter_end = cam_data.get("counter_init"), cam_data.get("counter_end")
+    counter_init, counter_end, counter_line = cam_data.get("counter_init"), cam_data.get("counter_end"), cam_data.get("counter_line")
     plot_x_offset, plot_y_offset = cam_data.get("plot_x_offset"), cam_data.get("plot_y_offset")
     act_y_init, act_y_finish = actuator_data.get("y_init"), actuator_data.get("y_finish")
     storage_data = config_data.get("storage_data")
@@ -73,7 +75,7 @@ if __name__ == "__main__":
     cam_params = CameraParameters(width, height,
                                   x = x_init, y = y_init,
                                   w = roi_width, h = roi_height)
-    cam_params.update_limits(counter_init, counter_end)
+    cam_params.update_limits(counter_init, counter_end, counter_line)
 
     # Variables
     frame_count = 0
@@ -115,6 +117,8 @@ if __name__ == "__main__":
     # Logger
     storage_path = storage_path if storage_data else None
     logger = Logger(output_dir = logger_path, storage_path = storage_path)
+    rod_count = 0
+    counted_track_ids = set()  # Initialize the new set
 
     while cap.isOpened():
         if take_time:
@@ -186,8 +190,8 @@ if __name__ == "__main__":
         if not actuator_moving:
             # print(frame_count+1, end=". ")
             tracker = Tracker(sorted_center_points_cur_frame, roi_frame, cam_params, debug=debug)
-            tracker.update_params(track_id, tracking_objects, center_points_prev_frame)
-            track_id, tracking_objects, center_points_prev_frame = tracker.track()
+            tracker.update_params(track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids)
+            track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids = tracker.track()
             tracker.plot_count()
 
         if take_time:

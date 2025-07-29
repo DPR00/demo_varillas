@@ -1,6 +1,6 @@
 from .datatypes import Rod
 from copy import deepcopy
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Set
 import cv2
 import numpy as np
 
@@ -15,6 +15,8 @@ class Tracker:
         self.rods_cur_frame =  center_points_cur_frame
         self.debug = debug
         self.rods_zone_init, self.rods_zone_tracking, self.rods_zone_end = self._zone_rods(self.rods_cur_frame)
+        self.rod_count = 0
+        self.counted_track_ids: Set[int] = set()
 
     def _zone_rods(self, rods: List[Rod]) -> Tuple[List[Rod], List[Rod], List[Rod]]:
         """
@@ -47,6 +49,12 @@ class Tracker:
         Applies heuristics to decide the order and direction of matching.
         Returns copies of objects to match and a flag for the association strategy.
         """
+        # --- Detect rods leaving the init zone ---
+        exiting_init_zone_count = 0
+        if self.rods_zone_init_prev: # Check if previous frame data exists
+             exiting_init_zone_count = len(self.rods_zone_init_prev) - len(self.rods_zone_init)
+        # ---
+
         tracking_objects_copy = deepcopy(self.tracking_objects)
         rods_zone_tracking_copy = self.rods_zone_tracking.copy()
         use_standard_association = True
@@ -62,13 +70,19 @@ class Tracker:
             mean_tracking_move = sum(diffs_tracking) / len(diffs_tracking) if diffs_tracking else 0
 
             init_diff = len(self.rods_zone_init) - len(self.rods_zone_init_prev)
+            tracking_diff = len(self.rods_zone_tracking) - len(self.rods_zone_tracking_prev)
             end_diff = len(self.rods_zone_end) - len(self.rods_zone_end_prev)
             end_is_stopped = end_diff < 0
+            if init_diff == tracking_diff == end_diff == 0:
+                # Put the text on the image
+                cv2.putText(self.frame, "ALERT: EDGE CASE", (700, 20), self.cp.font,
+                            self.cp.font_scale, self.cp.green,
+                            self.cp.font_thickness)
 
             if (len(self.rods_zone_init)== len(self.rods_zone_end_prev) == 0) and (init_diff == end_diff == 0):
                 print("use here")
                 use_standard_association = False
-                return tracking_objects_copy, rods_zone_tracking_copy, use_standard_association
+                return tracking_objects_copy, rods_zone_tracking_copy, use_standard_association, exiting_init_zone_count
 
             if end_diff == 0 and self.rods_zone_end_prev:
                 diffs_end = [a.pos_x - b.pos_x for a, b in zip(self.rods_zone_end, self.rods_zone_end_prev)]
@@ -82,16 +96,38 @@ class Tracker:
                 rods_zone_tracking_copy.reverse()
                 use_standard_association = False
 
-        return tracking_objects_copy, rods_zone_tracking_copy, use_standard_association
+        return tracking_objects_copy, rods_zone_tracking_copy, use_standard_association, exiting_init_zone_count
 
     def _associate_and_update(self,
                               objects_to_match: Dict[int, Rod],
                               rods_to_match: List[Rod],
-                              use_standard_association: bool):
+                              use_standard_association: bool,
+                              exiting_init_zone_count: int):
         """
         Matches tracked objects to current detections and updates their state.
         Handles lost tracks and creates new ones for unmatched detections.
         """
+        # --- MODIFIED LOGIC for handling rods exiting the init zone ---
+        if exiting_init_zone_count > 0:
+            # Identify the 'x' leftmost rods using a temporary sorted list
+            # without altering the order of the main 'rods_to_match' list.
+            temp_sorted_rods = sorted(rods_to_match, key=lambda r: r.pos_x)
+            newly_entered_rods = temp_sorted_rods[:exiting_init_zone_count]
+
+            # Use a set of object IDs for efficient lookup and removal.
+            newly_entered_ids = {id(rod) for rod in newly_entered_rods}
+
+            # Assign new track IDs to these newly identified rods.
+            for rod in newly_entered_rods:
+                rod.track_id = self.track_id
+                self.tracking_objects[self.track_id] = rod
+                self.track_id += 1
+
+            # Rebuild the list, filtering out the new rods while preserving the
+            # original order of the remaining rods for association.
+            rods_to_match[:] = [rod for rod in rods_to_match if id(rod) not in newly_entered_ids]
+        # --- END OF MODIFICATION ---
+
         if use_standard_association:
             unmatched_detections = rods_to_match.copy()
             lost_track_ids = []
@@ -128,10 +164,12 @@ class Tracker:
                     self.tracking_objects[object_id] = rod_curr
                     rod_curr.track_id = object_id
 
-    def update_params(self, track_id, tracking_objects, center_points_prev_frame):
+    def update_params(self, track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids):
         self.track_id = track_id
         self.tracking_objects = tracking_objects
         self.rods_zone_init_prev, self.rods_zone_tracking_prev, self.rods_zone_end_prev = self._zone_rods(center_points_prev_frame)
+        self.rod_count = rod_count
+        self.counted_track_ids = counted_track_ids
 
     def track(self) -> Tuple[int, Dict[int, Rod], List[Rod]]:
         """
@@ -140,29 +178,50 @@ class Tracker:
         # 1. If no objects are being tracked, initialize new tracks and exit.
         if not self.tracking_objects:
             self._initialize_new_tracks()
-            return self.track_id, self.tracking_objects, deepcopy(self.rods_cur_frame)
+            return self.track_id, self.tracking_objects, deepcopy(self.rods_cur_frame), self.rod_count, self.counted_track_ids
 
         # 2. Handle objects that have exited the final zone.
         self._handle_exiting_rods()
 
         # 3. Prepare lists for matching based on the custom heuristics.
         # This determines the strategy for associating old tracks with new detections.
-        tracking_objects_to_match, rods_to_match, use_standard_association = self._prepare_association_lists()
+        tracking_objects_to_match, rods_to_match, use_standard_association, exiting_init_zone_count = self._prepare_association_lists()
 
         # 4. Perform the association and update the state.
         self._associate_and_update(
             tracking_objects_to_match,
             rods_to_match,
-            use_standard_association
+            use_standard_association,
+            exiting_init_zone_count
         )
 
-        return self.track_id, self.tracking_objects, deepcopy(self.rods_cur_frame)
+        # --- NEW & IMPROVED COUNTING LOGIC ---
+        # Iterate through all successfully tracked objects after association.
+        for track_id, current_rod in self.tracking_objects.items():
+            # Find the object's state from the previous frame.
+            previous_rod = tracking_objects_to_match.get(track_id)
+            # Ensure the object existed in the previous frame to check for a crossing.
+            if previous_rod is not None:
+                print(f"1st if: prev: {previous_rod.pos_x} and curr: {current_rod.pos_x}, ce: {self.cp.counter_line}")
+                # A rod is counted only if it hasn't been counted before.
+                if True:#track_id not in self.counted_track_ids:
+                    print("2nd if")
+                    # Check if it crossed the line from left-to-right.
+                    if previous_rod.pos_x <= self.cp.counter_line and current_rod.pos_x > self.cp.counter_line:
+                        print("3th if")
+                        self.rod_count += 1
+                        self.counted_track_ids.add(track_id) # Mark this ID as counted.
+        # --- END OF NEW LOGIC ---
+
+        return self.track_id, self.tracking_objects, deepcopy(self.rods_cur_frame), self.rod_count, self.counted_track_ids
 
     def plot_count(self):
         cv2.line(self.frame, (self.cp.counter_init, 0),
                  (self.cp.counter_init, self.cp.h), self.cp.green, self.cp.font_thickness)
         cv2.line(self.frame, (self.cp.counter_end, 0),
                  (self.cp.counter_end, self.cp.h), self.cp.red, self.cp.font_thickness)
+        cv2.line(self.frame, (self.cp.counter_line, 0),
+                 (self.cp.counter_line, self.cp.h), self.cp.blue, self.cp.font_thickness)
 
         if self.debug:
             print("TO: ", self.tracking_objects)
@@ -179,7 +238,7 @@ class Tracker:
             text_pos = (point.pos_x, point.pos_y - 7)
             cv2.putText(self.frame, str(object_id),text_pos, 0, 1,  self.cp.black, self.cp.font_thickness)
 
-        text = f"Varillas: {self.track_id - 1}"
+        text = f"Varillas: {self.rod_count}"
 
         # Get the size of the text
         (text_width, text_height), _ = cv2.getTextSize(text, self.cp.font,
