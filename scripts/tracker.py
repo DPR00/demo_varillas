@@ -48,7 +48,11 @@ class Tracker:
         """
         Applies heuristics to decide the order and direction of matching.
         Returns copies of objects to match and a flag for the association strategy.
+        Parameters:
+            self.tracking_objects: Objects being tracked from the previous frame
         """
+        use_standard_association = True
+
         # --- Detect rods leaving the init zone ---
         exiting_init_zone_count = 0
         if self.rods_zone_init_prev: # Check if previous frame data exists
@@ -57,7 +61,21 @@ class Tracker:
 
         tracking_objects_copy = deepcopy(self.tracking_objects)
         rods_zone_tracking_copy = self.rods_zone_tracking.copy()
-        use_standard_association = True
+        tracking_diff = len(self.rods_zone_tracking) - len(self.rods_zone_tracking_prev)
+        end_diff = len(self.rods_zone_end) - len(self.rods_zone_end_prev)
+
+        if len(self.rods_zone_tracking) > len(self.rods_zone_tracking_prev):
+            if tracking_diff > 0 and (tracking_diff + end_diff) == 0:
+                if self.debug:
+                    cv2.putText(self.frame, "TRYING TO SOLVE EDGE CASE III.", (700, 20*4), self.cp.font,
+                                self.cp.font_scale, self.cp.green,
+                                self.cp.font_thickness)
+
+                for i in range(tracking_diff):
+                    tmp_diff_track = self.cp.counter_end - rods_zone_tracking_copy[i].pos_x
+                    tmp_diff_end = self.rods_zone_end[len(self.rods_zone_end) - (i+1)].pos_x - self.cp.counter_end if len(self.rods_zone_end) > 0 else 20
+                    if tmp_diff_track < 15 and tmp_diff_end < 15:
+                        rods_zone_tracking_copy.pop(i)
 
         # If rods are disappearing from the tracking zone, reverse the matching order.
         if len(self.rods_zone_tracking) < len(self.rods_zone_tracking_prev):
@@ -66,21 +84,26 @@ class Tracker:
 
         # If the number of rods is stable, check for specific movement patterns.
         elif len(self.rods_zone_tracking) == len(self.rods_zone_tracking_prev):
+            init_diff = len(self.rods_zone_init) - len(self.rods_zone_init_prev)
             diffs_tracking = [a.pos_x - b.pos_x for a, b in zip(self.rods_zone_tracking, self.rods_zone_tracking_prev)]
             mean_tracking_move = sum(diffs_tracking) / len(diffs_tracking) if diffs_tracking else 0
-
-            init_diff = len(self.rods_zone_init) - len(self.rods_zone_init_prev)
-            tracking_diff = len(self.rods_zone_tracking) - len(self.rods_zone_tracking_prev)
-            end_diff = len(self.rods_zone_end) - len(self.rods_zone_end_prev)
             end_is_stopped = end_diff < 0
-            if init_diff == tracking_diff == end_diff == 0:
-                # Put the text on the image
-                cv2.putText(self.frame, "ALERT: EDGE CASE", (700, 20), self.cp.font,
-                            self.cp.font_scale, self.cp.green,
-                            self.cp.font_thickness)
 
-            if (len(self.rods_zone_init)== len(self.rods_zone_end_prev) == 0) and (init_diff == end_diff == 0):
-                print("use here")
+            # Worst case scenario, how to solve it if there is no difference between images?
+            # (Solved if there is enough difference)
+            if init_diff == tracking_diff == end_diff == 0 and \
+                self.rods_zone_init and self.rods_zone_tracking and self.rods_zone_end:
+                if self.debug:
+                    cv2.putText(self.frame, "ALERT: EDGE CASE I.", (700, 20), self.cp.font,
+                                self.cp.font_scale, self.cp.green,
+                                self.cp.font_thickness)
+
+            # If there are rods only in the tracking zone, then don't use associtation (Solved?)
+            if (len(self.rods_zone_init) == len(self.rods_zone_end_prev) == 0) and (init_diff == end_diff == 0):
+                if self.debug:
+                    cv2.putText(self.frame, "TRYING TO SOLVE EDGE CASE II.", (700, 20*2), self.cp.font,
+                                self.cp.font_scale, self.cp.green,
+                                self.cp.font_thickness)
                 use_standard_association = False
                 return tracking_objects_copy, rods_zone_tracking_copy, use_standard_association, exiting_init_zone_count
 
@@ -90,8 +113,12 @@ class Tracker:
                 end_is_stopped = abs(mean_end_move) < 15 # Heuristic threshold
 
             # Special case: If tracking rods are moving right and end zone rods have stopped,
-            # use a simplified, one-to-one association strategy.
+            # use a simplified, one-to-one association strategy. (Solved?)
             if mean_tracking_move >= -15 and end_is_stopped: # Heuristic threshold
+                if self.debug:
+                    cv2.putText(self.frame, "TRYING TO SOLVE EDGE CASE I.", (700, 20*3), self.cp.font,
+                                self.cp.font_scale, self.cp.green,
+                                self.cp.font_thickness)
                 tracking_objects_copy = dict(sorted(self.tracking_objects.items(), reverse=True))
                 rods_zone_tracking_copy.reverse()
                 use_standard_association = False
@@ -164,6 +191,47 @@ class Tracker:
                     self.tracking_objects[object_id] = rod_curr
                     rod_curr.track_id = object_id
 
+    def _remap_track_ids(self):
+        """Ensures track IDs are consecutive, preserving their ascending order."""
+        track_ids = sorted(list(self.tracking_objects.keys()), reverse=True)
+        if len(track_ids) <= 1:
+            return
+
+        is_consecutive = all(track_ids[i] == track_ids[i-1] - 1 for i in range(1, len(track_ids)))
+        if not is_consecutive:
+            if self.debug:
+                cv2.putText(self.frame, "ALERT: REMAPPING IDS", (700, 20*5), self.cp.font,
+                            self.cp.font_scale, self.cp.green, self.cp.font_thickness)
+
+            remapped_objects = {}
+            # El ID más alto se convierte en el punto de partida
+            new_max_id = track_ids[0]
+
+            for i, old_id in enumerate(track_ids):
+                # El nuevo ID se calcula decrementando desde el máximo
+                new_id = new_max_id - i
+
+                # Obtenemos el objeto Rod original
+                rod_object = self.tracking_objects[old_id]
+
+                # Actualizamos el ID interno del objeto
+                rod_object.track_id = new_id
+
+                # Añadimos el objeto al nuevo diccionario con el ID corregido
+                remapped_objects[new_id] = rod_object
+
+            self.tracking_objects = dict(sorted(remapped_objects.items()))
+            self.track_id = new_max_id + 1
+
+    def _count_passing_rods(self, previous_tracks: Dict[int, Rod]):
+        """Increments count for rods that cross the counting line."""
+        for track_id, current_rod in self.tracking_objects.items():
+            previous_rod = previous_tracks.get(track_id)
+            if previous_rod and track_id not in self.counted_track_ids:
+                if previous_rod.pos_x <= self.cp.counter_line and current_rod.pos_x > self.cp.counter_line:
+                    self.rod_count += 1
+                    self.counted_track_ids.add(track_id)
+
     def update_params(self, track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids):
         self.track_id = track_id
         self.tracking_objects = tracking_objects
@@ -180,38 +248,22 @@ class Tracker:
             self._initialize_new_tracks()
             return self.track_id, self.tracking_objects, deepcopy(self.rods_cur_frame), self.rod_count, self.counted_track_ids
 
+       # Store a copy of tracks before they are modified for counting later.
+        previous_tracks = deepcopy(self.tracking_objects)
+
         # 2. Handle objects that have exited the final zone.
         self._handle_exiting_rods()
 
         # 3. Prepare lists for matching based on the custom heuristics.
         # This determines the strategy for associating old tracks with new detections.
-        tracking_objects_to_match, rods_to_match, use_standard_association, exiting_init_zone_count = self._prepare_association_lists()
+        association_params = self._prepare_association_lists()
 
         # 4. Perform the association and update the state.
-        self._associate_and_update(
-            tracking_objects_to_match,
-            rods_to_match,
-            use_standard_association,
-            exiting_init_zone_count
-        )
+        self._associate_and_update(*association_params)
 
-        # --- NEW & IMPROVED COUNTING LOGIC ---
-        # Iterate through all successfully tracked objects after association.
-        for track_id, current_rod in self.tracking_objects.items():
-            # Find the object's state from the previous frame.
-            previous_rod = tracking_objects_to_match.get(track_id)
-            # Ensure the object existed in the previous frame to check for a crossing.
-            if previous_rod is not None:
-                print(f"1st if: prev: {previous_rod.pos_x} and curr: {current_rod.pos_x}, ce: {self.cp.counter_line}")
-                # A rod is counted only if it hasn't been counted before.
-                if True:#track_id not in self.counted_track_ids:
-                    print("2nd if")
-                    # Check if it crossed the line from left-to-right.
-                    if previous_rod.pos_x <= self.cp.counter_line and current_rod.pos_x > self.cp.counter_line:
-                        print("3th if")
-                        self.rod_count += 1
-                        self.counted_track_ids.add(track_id) # Mark this ID as counted.
-        # --- END OF NEW LOGIC ---
+        self._remap_track_ids()
+
+        self._count_passing_rods(previous_tracks)
 
         return self.track_id, self.tracking_objects, deepcopy(self.rods_cur_frame), self.rod_count, self.counted_track_ids
 
