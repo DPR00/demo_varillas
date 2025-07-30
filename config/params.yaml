@@ -2,13 +2,13 @@
 
 # Configuraciones basicas
 app_name: "Contador de varillas - IA+TECH"
-version: test_varillas_moviendo_como_detenidas
+version: test_normal_operation2_
 debug_mode: True
 generate_video: False
 storage_data: False
 
 model: "contador_yolo11n_270725_best.pt"
-input_video: "varillas_moviendo_como_detenidas.mp4"
+input_video: "normal_operation2.mp4"
 logo: "LOGO_CE.png"
 
 folders:
@@ -28,10 +28,11 @@ camera:
   plot_x_offset: 300
   plot_y_offset: 50
   counter_init: 300
-  counter_end: 1248
+  counter_end: 960
+  counter_line: 800
 
 tracker:
-  min_confidence: 0.5
+  min_confidence: 0.8
 
 actuator:
   x_offset: 130
