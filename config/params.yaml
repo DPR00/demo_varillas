@@ -4,11 +4,12 @@
 app_name: "Contador de varillas - IA+TECH"
 version: test_normal_operation2_
 debug_mode: True
-generate_video: False
+generate_video: True
 storage_data: False
 
 model: "contador_yolo11n_270725_best.pt"
-input_video: "normal_operation2.mp4"
+# input_video: "rtsp://admin:Hik12345@192.168.18.5/Straming/channels/101"
+input_video: "test1_contador_de_varillas.mp4"
 logo: "LOGO_CE.png"
 
 folders:
@@ -30,6 +31,15 @@ camera:
   counter_init: 300
   counter_end: 960
   counter_line: 800
+  # x_init: 683
+  # y_init: 403
+  # roi_width: 577
+  # roi_height: 677
+  # plot_x_offset: 300
+  # plot_y_offset: 50
+  # counter_init: 300
+  # counter_end: 460
+  # counter_line: 400
 
 tracker:
   min_confidence: 0.8

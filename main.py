@@ -10,7 +10,8 @@ take_time = False
 
 if __name__ == "__main__":
     current_struct_time = time.localtime()
-    timestamp_string = time.strftime("%Y-%m-%d %H:%M:%S", current_struct_time)
+    timestamp_string = time.strftime("%Y-%m-%d", current_struct_time)
+    # timestamp_string = time.strftime("%Y-%m-%d %H:%M:%S", current_struct_time)
     if take_time:
         start_time = time.perf_counter()
 
@@ -22,7 +23,11 @@ if __name__ == "__main__":
 
     # Get paths using os.path.join for cross-platform compatibility
     model_path = os.path.join(dir_path, folders_data.get("models"), config_data.get("model"))
-    video_path = os.path.join(dir_path, folders_data.get("media"), config_data.get("input_video"))
+    input_video = config_data.get("input_video")
+    if input_video and input_video.startswith("rtsp://"):
+        video_path = input_video
+    else:
+        video_path = os.path.join(dir_path, folders_data.get("media"), input_video)
     logo_path = os.path.join(dir_path, folders_data.get("assets"), config_data.get("logo"))
     logger_path = os.path.join(dir_path, folders_data.get("logger"), config_data.get("version"))
     output_path = os.path.join(dir_path, folders_data.get("output"), config_data.get("version") + timestamp_string + ".mp4")
@@ -55,11 +60,17 @@ if __name__ == "__main__":
 
     # Open the video file
     cap = cv2.VideoCapture(video_path)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)        # Mantén solo 1 frame en el buffer
+    cap.set(cv2.CAP_PROP_FPS, 30)              # Ajusta al FPS real de tu cámara
+    # Si tu OpenCV lo soporta:
+    # cap.set(cv2.CAP_PROP_RTSP_TRANSPORT, 1)    # 0=Any, 1=UDP, 2=TCP
+    # cap.set(cv2.CAP_PROP_LATENCY, 0)           # Forzar latencia mínima
 
     # Check if the video file opened successfully
     if not cap.isOpened():
-        print("Error: Could not open video.")
+        print(f"[ERROR] No se pudo abrir el video o stream: {video_path}")
         exit()
+
 
     if take_time:
         end_time = time.perf_counter()
@@ -142,7 +153,7 @@ if __name__ == "__main__":
                           cam_params.x : cam_params.x + cam_params.w]
         clean_roi_frame = roi_frame.copy()
 
-        detections = model(roi_frame, verbose=False)
+        detections = model(roi_frame, verbose=True)
 
         if take_time:
             end_time = time.perf_counter()
