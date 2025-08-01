@@ -20,6 +20,15 @@ folders:
   storage: "storage"
   imgs: "imgs"
 
+# GStreamer configuration
+gstreamer:
+  use_hw_accel: true
+  input_source: "media/operation_1920x1080.mp4"  # Can be file path, RTSP URL, or device path
+  width: 1920
+  height: 1080
+  fps: 30
+  latency: 0  # For real-time streams
+
 camera:
   x_init: 1000
   y_init: 1055

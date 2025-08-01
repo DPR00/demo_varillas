@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  demo-varillas:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: demo-varillas-app
+    volumes:
+      # Mount input media
+      - ./media:/app/media:ro
+      # Mount models
+      - ./models:/app/models:ro
+      # Mount assets
+      - ./assets:/app/assets:ro
+      # Mount config
+      - ./config:/app/config:ro
+      # Mount output directories for persistence
+      - ./output:/app/output
+      - ./logger:/app/logger
+      - ./storage:/app/storage
+      # Mount scripts
+      - ./scripts:/app/scripts:ro
+      # Mount X11 socket for display
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      - DISPLAY=${DISPLAY}
+    network_mode: host
+    # For GUI applications, you might need to run with --privileged
+    # or mount X11 socket for display
+    stdin_open: true
+    tty: true
+    # Uncomment the line below if you need GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  demo-varillas-gstreamer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: demo-varillas-gstreamer-app
+    volumes:
+      # Mount input media
+      - ./media:/app/media:ro
+      # Mount models
+      - ./models:/app/models:ro
+      # Mount assets
+      - ./assets:/app/assets:ro
+      # Mount config
+      - ./config:/app/config:ro
+      # Mount output directories for persistence
+      - ./output:/app/output
+      - ./logger:/app/logger
+      - ./storage:/app/storage
+      # Mount scripts
+      - ./scripts:/app/scripts:ro
+      # Mount X11 socket for display
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      - DISPLAY=${DISPLAY}
+    network_mode: host
+    # For GUI applications, you might need to run with --privileged
+    # or mount X11 socket for display
+    stdin_open: true
+    tty: true
+    command: ["/app/start_services.sh"]
+    ports:
+      # MediaMTX ports
+      - "8888:8888"   # RTSP
+      - "8889:8889"   # RTSP (alternative)
+      - "1935:1935"   # RTMP
+      - "9997:9997"   # API
+      - "9998:9998"   # Metrics
+    # Uncomment the line below if you need GPU support for GStreamer
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
