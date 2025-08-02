@@ -2,7 +2,8 @@ import cv2
 import os
 
 # Configuración de la cámara (reemplaza con tus datos)
-RTSP_URL = "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/Channels/101?transportmode=unicast"
+# RTSP_URL = "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/Channels/101?transportmode=unicast"
+RTSP_URL = "media/test_30_07_25_17_18pm.mp4"
 BUFFER_SIZE = 1  # Reduce el buffer para menor latencia
 
 # Usar decodificación por hardware (si tienes GPU NVIDIA)
