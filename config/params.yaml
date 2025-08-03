@@ -41,6 +41,11 @@ camera:
   counter_end: 500
   counter_line: 370
 
+serial:
+  port: "COM3"
+  baud_rate: 115200
+  timeout: 1
+
 tracker:
   min_confidence: 0.8
 
