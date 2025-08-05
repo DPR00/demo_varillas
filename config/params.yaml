@@ -8,8 +8,9 @@ generate_video: False
 storage_data: False
 
 model: "contador_yolo11n_040825.pt"
-# input_video: "rtsp://admin:Hik12345@192.168.18.5/Straming/channels/101"
-input_video: "operation_1920x1080.mp4"
+# input_video: "rtsp://admin:Hik12345@192.168.18.5/Streaming/channels/101?transportmode=unicast"
+input_video: "rtsp://admin:IA+T3cCAM@192.168.18.4/Streaming/channels/101?transportmode=unicast"
+# input_video: "operation_1920x1080.mp4"
 logo: "LOGO_CE.png"
 
 folders:
