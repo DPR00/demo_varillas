@@ -1,60 +1,111 @@
+import av
 import cv2
 import threading
 import queue
 import time
 import numpy as np
-from ultralytics import YOLO  # pip install ultralytics
+from ultralytics import YOLO
 from torch import cuda as t_cuda
 from torch import device as t_device
-from scripts import CameraParameters, get_data, Tracker, plot_historic, read_yaml_file, get_positions, Logger
+from av.error import FFmpegError
+# Importaciones de tus scripts personalizados
+from scripts import CameraParameters, get_data, Tracker, plot_historic, get_positions, Logger
 import os
-# ===== Configuración Global =====
-# RTSP_URL = "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/Channels/101?transportmode=unicast"
 
+# ===== Configuración Global =====
 dir_path = os.path.dirname(os.path.abspath(__file__))
 data = get_data(dir_path)
-RTSP_URL = data['video_path'] #"media/operation_1920x1080.mp4"  # O tu URL RTSP
-MODEL_PATH = data['model_path'] #"models/contador_yolo11n_030825.pt"
-BUFFER_SIZE = 1  # Tamaño del buffer para baja latencia
+RTSP_URL = data['video_path']
+MODEL_PATH = data['model_path']
+BUFFER_SIZE = 1
 WIDTH, HEIGHT = 1920, 1080
+
+# Opciones optimizadas para conexiones inestables (PyAV)
+FFMPEG_OPTIONS = {
+    'rtsp_transport': 'tcp',
+    'fflags': 'nobuffer',
+    'flags': 'low_delay',
+    'max_delay': '500000',
+    'analyzeduration': '100000',
+    'probesize': '1024',
+    'tune': 'zerolatency',
+    'framedrop': '1',
+    'avioflags': 'direct',
+    'flush_packets': '1',
+    'timeout': '5000000',
+    'reconnect': '1',
+    'reconnect_at_eof': '1',
+    'reconnect_streamed': '1',
+    'reconnect_delay_max': '5',
+    'stimeout': '5000000',
+    'heartbeat_interval': '10'
+}
 
 # Colas para comunicación entre hilos
 raw_frame_queue = queue.Queue(maxsize=2)       # Frames sin procesar
 processed_frame_queue = queue.Queue(maxsize=2)  # Frames procesados con detecciones
 stop_event = threading.Event()                 # Señal de parada para todos los hilos
 
-# ===== Hilo 1: Captura de Video =====
+# ===== Hilo 1: Captura de Video con PyAV =====
 def video_capture_thread():
-    cap = cv2.VideoCapture(RTSP_URL)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, BUFFER_SIZE)
-    cap.set(cv2.CAP_PROP_FPS, 30)
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('H','2','6','4'))  # Códec H.264
-
-    if not cap.isOpened():
-        print("Error: No se pudo abrir la fuente de video")
-        stop_event.set()
-        return
-
-    print("Hilo de captura iniciado")
+    print("Hilo de captura iniciado (PyAV)")
+    last_frame = None
+    
     while not stop_event.is_set():
-        ret, frame = cap.read()
-        if not ret:
-            print("Error de lectura de frame")
-            time.sleep(0.1)
-            # stop_event.set()
-            continue
+        try:
+            # Abrir el stream con PyAV
+            container = av.open(RTSP_URL, options=FFMPEG_OPTIONS)
+            stream = container.streams.video[0]
+            print(f"Conexión RTSP establecida: {RTSP_URL}")
+            
+            for packet in container.demux(stream):
+                if stop_event.is_set():
+                    break
+                    
+                for frame in packet.decode():
+                    if stop_event.is_set():
+                        break
+                        
+                    # Convertir frame a array de numpy (BGR para OpenCV)
+                    img = frame.to_ndarray(format='bgr24')
+                    last_frame = img
+                    
+                    # Limpiar cola si está llena para mantener solo el frame más reciente
+                    if raw_frame_queue.full():
+                        try:
+                            raw_frame_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                    
+                    raw_frame_queue.put(img)
         
-        # Limpiar cola si está llena para mantener solo el frame más reciente
-        if raw_frame_queue.full():
-            try:
-                raw_frame_queue.get_nowait()
-            except queue.Empty:
-                pass
-        ## DELETE THIS FOR THE REAL DEMO (THIS LINE IS ONLY TO SIMULATE 30 FPS WHEN READING A SAVED VIDEO)
-        time.sleep(0.033)
-
-        raw_frame_queue.put(frame)
-    cap.release()
+        except FFmpegError as e:
+            print(f"Error de conexión (PyAV): {e}")
+            # Mostrar último frame durante la reconexión
+            if last_frame is not None:
+                # Limpiar cola si está llena
+                if raw_frame_queue.full():
+                    try:
+                        raw_frame_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                raw_frame_queue.put(last_frame.copy())  # Enviamos una copia del último frame
+            print("Reintentando conexión en 2 segundos...")
+            time.sleep(2)
+            
+        except Exception as e:
+            print(f"Error inesperado en captura (PyAV): {e}")
+            # Mostrar último frame durante la reconexión
+            if last_frame is not None:
+                if raw_frame_queue.full():
+                    try:
+                        raw_frame_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                raw_frame_queue.put(last_frame.copy())
+            print("Reintentando conexión en 5 segundos...")
+            time.sleep(5)
+    
     print("Hilo de captura terminado")
 
 # ===== Hilo 2: Procesamiento con YOLO =====
@@ -108,11 +159,13 @@ def processing_thread():
     while not stop_event.is_set():
         try:
             # Obtener el último frame disponible (esperar máximo 0.5s)
-            frame = raw_frame_queue.get(timeout=0.5)
+            full_frame = raw_frame_queue.get(timeout=0.5)
 
             # ROI frame
-            roi_frame = frame[cam_params.y : cam_params.y + cam_params.h,
-                            cam_params.x : cam_params.x + cam_params.w]            # Realizar detecciones con YOLO
+            roi_frame = full_frame[cam_params.y : cam_params.y + cam_params.h,
+                                  cam_params.x : cam_params.x + cam_params.w]
+            
+            # Realizar detecciones con YOLO
             detections = model(roi_frame, verbose=False, stream=False)
 
             # Procesar resultados
@@ -122,12 +175,14 @@ def processing_thread():
             center_points_cur_frame, actuator_pos = get_positions(detections,
                                                                 data['min_confidence'],
                                                                 data['actuator_data'])
+            
             # Limpiar cola si está llena para mantener solo el frame más reciente
             if processed_frame_queue.full():
                 try:
                     processed_frame_queue.get_nowait()
                 except queue.Empty:
                     pass
+            
             sorted_center_points_cur_frame = sorted(center_points_cur_frame, key = lambda point: point.pos_x)
             sorted_center_points_cur_frame.reverse()
 
@@ -152,6 +207,8 @@ def processing_thread():
             pass  # No hay frames disponibles, continuar
         except Exception as e:
             print(f"Error en procesamiento: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     if video_writer is not None:
         video_writer.release()
@@ -192,7 +249,7 @@ def display_thread():
         
         # Mostrar información de rendimiento
         if processed_frame is not None:
-            display_frame = processed_frame #cv2.resize(processed_frame, (1280, 720))
+            display_frame = processed_frame
             
             # Mostrar FPS y estado
             cv2.putText(display_frame, f"FPS: {fps:.1f}", (400, 60), 
@@ -234,6 +291,7 @@ def main():
             time.sleep(0.5)
     except KeyboardInterrupt:
         stop_event.set()
+        print("Deteniendo todos los hilos...")
     
     print("Sistema terminado")
 

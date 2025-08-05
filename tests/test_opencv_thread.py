@@ -74,21 +74,7 @@ def processing_thread():
     actuator_moving = False
     rod_count = 0
     counted_track_ids = set()
-    video_writer = None
-    if data['generate_video']:
-        output_path = data['output_path']
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        fps = 30.0  # Asumir 30 FPS 
-        frame_size = (data['roi_width'], data['roi_height'])
-        video_writer = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
-        
-        if not video_writer.isOpened():
-            print(f"[ERROR] Could not initialize video writer for {output_path}")
-            video_writer = None
-        else:
-            print(f"Video writer initialized: {output_path} at {fps} FPS, size {frame_size}")
-    
+
     cam_params = CameraParameters(WIDTH, HEIGHT,
                                   x = data['x_init'], y = data['y_init'],
                                   w = data['roi_width'], h = data['roi_height'])
@@ -131,6 +117,7 @@ def processing_thread():
             sorted_center_points_cur_frame = sorted(center_points_cur_frame, key = lambda point: point.pos_x)
             sorted_center_points_cur_frame.reverse()
 
+
             tracker = Tracker(sorted_center_points_cur_frame, roi_frame, cam_params, debug=data['debug'])
             tracker.update_params(track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids)
             track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids = tracker.track()
@@ -142,20 +129,12 @@ def processing_thread():
             prev_size = len(list_counter)
 
             processed_frame_queue.put(roi_frame)
-
-            if video_writer is not None:
-                # Clonar el frame para evitar modificaciones posteriores
-                frame_to_write = roi_frame.copy()
-                video_writer.write(frame_to_write)
             
         except queue.Empty:
             pass  # No hay frames disponibles, continuar
         except Exception as e:
             print(f"Error en procesamiento: {str(e)}")
-
-    if video_writer is not None:
-        video_writer.release()
-        print("Video writer released")
+    
     print("Hilo de procesamiento terminado")
 
 # ===== Hilo 3: Visualización =====
