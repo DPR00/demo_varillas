@@ -6,8 +6,10 @@ import numpy as np
 from ultralytics import YOLO  # pip install ultralytics
 from torch import cuda as t_cuda
 from torch import device as t_device
-from scripts import CameraParameters, get_data, Tracker, plot_historic, read_yaml_file, get_positions, Logger
+from scripts import CameraParameters, get_data, Tracker, plot_historic, read_yaml_file, get_positions, Logger, handle_actuator
 import os
+import serial
+
 # ===== Configuración Global =====
 # RTSP_URL = "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/Channels/101?transportmode=unicast"
 
@@ -35,6 +37,17 @@ def video_capture_thread():
         stop_event.set()
         return
 
+    data_to_send = {}
+    raw_data_motor = 1
+    direction = 1 # Default direction
+    try:
+        ser = serial.Serial(data['serial_port'], data['serial_baud_rate'], timeout=data['serial_timeout'])
+        # Dar tiempo para que el ESP32 reinicie y desechar logs de arranque
+        time.sleep(2)
+        ser.reset_input_buffer()
+    except serial.SerialException as e:
+        print(f"Error al abrir {data['serial_port']}: {e}")
+
     print("Hilo de captura iniciado")
     while not stop_event.is_set():
         ret, frame = cap.read()
@@ -43,7 +56,25 @@ def video_capture_thread():
             time.sleep(0.1)
             # stop_event.set()
             continue
-        
+
+        try:
+            raw_data_motor = ser.readline()
+            if raw_data_motor:
+                line = raw_data_motor.decode('utf-8').strip()
+                # Si la línea consiste en exactamente 4 caracteres de '0' o '1', la mostramos
+                if len(line) == 2 and all(c in '01' for c in line):
+                    if line == '10':
+                        direction = -1
+                    elif line == '00':
+                        direction = 0
+                    else:
+                        direction = 1 # Default direction
+        except:
+            print(f"Error en serial. Línea a decodificar: {raw_data_motor}")
+
+        data_to_send['direction'] = direction
+        data_to_send['frame'] = frame
+
         # Limpiar cola si está llena para mantener solo el frame más reciente
         if raw_frame_queue.full():
             try:
@@ -53,7 +84,7 @@ def video_capture_thread():
         ## DELETE THIS FOR THE REAL DEMO (THIS LINE IS ONLY TO SIMULATE 30 FPS WHEN READING A SAVED VIDEO)
         time.sleep(0.033)
 
-        raw_frame_queue.put(frame)
+        raw_frame_queue.put(data_to_send)
     cap.release()
     print("Hilo de captura terminado")
 
@@ -61,19 +92,18 @@ def video_capture_thread():
 def processing_thread():
     # variables
     frame_count = 0
-    track_id = 1
-    tracking_objects = {}
-    center_points_prev_frame = []
+    tracker_data = {'track_id': 1,
+                    'tracking_objects': {},
+                    'rod_count': 0,
+                    'counted_track_ids': set(),
+                    'center_points_prev_frame': []}
     list_counter = [] # For plot historic
     actuator_initial_pos = (0,0)
-    min_track = 0
     prev_size = -1
-    max_key = -1
-    counted = False
-    stored_list = False
     actuator_moving = False
-    rod_count = 0
-    counted_track_ids = set()
+    store_package = False
+    direction = 1 # 1: left to right (Default), 0: stop, -1: right to left
+    actuactor_count = 0
 
     cam_params = CameraParameters(WIDTH, HEIGHT,
                                   x = data['x_init'], y = data['y_init'],
@@ -94,8 +124,9 @@ def processing_thread():
     while not stop_event.is_set():
         try:
             # Obtener el último frame disponible (esperar máximo 0.5s)
-            frame = raw_frame_queue.get(timeout=0.5)
-
+            data_received = raw_frame_queue.get(timeout=0.5)
+            frame = data_received['frame']
+            direction = data_received['direction']
             # ROI frame
             roi_frame = frame[cam_params.y : cam_params.y + cam_params.h,
                             cam_params.x : cam_params.x + cam_params.w]            # Realizar detecciones con YOLO
@@ -117,11 +148,15 @@ def processing_thread():
             sorted_center_points_cur_frame = sorted(center_points_cur_frame, key = lambda point: point.pos_x)
             sorted_center_points_cur_frame.reverse()
 
+            list_counter, tracker_data, store_package, actuactor_count = handle_actuator(cam_params, actuator_pos, list_counter, tracker_data, store_package, actuactor_count)
 
-            tracker = Tracker(sorted_center_points_cur_frame, roi_frame, cam_params, debug=data['debug'])
-            tracker.update_params(track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids)
-            track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids = tracker.track()
-            tracker.plot_count()
+            if direction != 0:
+                tracker = Tracker(sorted_center_points_cur_frame, roi_frame, cam_params, debug=data['debug'], direction=direction)
+                tracker.update_params(tracker_data)
+                tracker_data= tracker.track()
+                tracker.plot_count()
+                store_package = False
+                actuactor_count = 0
 
             if data['debug']:
                 logger.log(roi_frame, frame_count)

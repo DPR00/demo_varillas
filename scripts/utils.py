@@ -6,6 +6,7 @@ import yaml
 import os
 from .datatypes import Rod
 from .CamParameters import CameraParameters
+import csv
 
 def read_yaml_file(path: str):
     try:
@@ -67,6 +68,7 @@ def get_data(dir_path):
     cam_data = config_data.get("camera")
     tracker_data = config_data.get("tracker")
     actuator_data = config_data.get("actuator")
+    serial_data = config_data.get("serial")
     # Get paths using os.path.join for cross-platform compatibility
     input_video = config_data.get("input_video")
     logo_path = os.path.join(dir_path, folders_data.get("assets"), config_data.get("logo"))
@@ -113,11 +115,70 @@ def get_data(dir_path):
     data["act_y_init"] = act_y_init
     data["act_y_finish"] = act_y_finish
     data["storage_data"] = storage_data
+    data["serial_port"] = serial_data.get("port")
+    data["serial_baud_rate"] = serial_data.get("baud_rate")
+    data["serial_timeout"] = serial_data.get("timeout")
 
     return data
 
+def handle_actuator(cam_params, actuator_pos, list_counter, tracker_data, store_package, actuactor_count):
+    actuator_detected = actuator_pos[1] != 0 and actuator_pos[1] != 0
+
+    if actuator_detected:
+        actuactor_count += 1
+        # We need to detect the actuator at least 2 times to start handle it
+        if actuactor_count < 2:
+            store_package = True
+            return list_counter, tracker_data, store_package, actuactor_count
+
+    if tracker_data['rod_count'] > 0 and store_package:
+        diff_rods = len([rod for rod in tracker_data['center_points_prev_frame'] if actuator_pos[0] >= rod.pos_x and rod.pos_x >= cam_params.counter_line])
+        list_counter.append(tracker_data['rod_count'] - diff_rods)
+        actuactor_count = 0
+        store_package = False
+        tracker_data['rod_count'] = 0
+        tracker_data['center_points_prev_frame'] = []
+        tracker_data['counted_track_ids'] = set()
+        tracker_data['track_id'] = 1
+        tracker_data['tracking_objects'] = {}
+
+    return list_counter, tracker_data, store_package, actuactor_count
+
 def plot_historic(main_image, list_counter, logo):
     paquetes = list_counter.copy()
+
+    # CSV file handling
+    csv_filename = "contador_varillas.csv"
+
+    # Check if there are new packages to add to CSV
+    # We'll track the last processed count to avoid duplicates
+    static_variable_name = '_last_processed_count'
+    if not hasattr(plot_historic, static_variable_name):
+        plot_historic._last_processed_count = 0
+
+    # If there are new packages, add them to CSV
+    if len(paquetes) > plot_historic._last_processed_count:
+        current_time = time.localtime()
+        date_str = time.strftime("%Y-%m-%d", current_time)
+        time_str = time.strftime("%H:%M:%S", current_time)
+
+        # Add new packages to CSV
+        with open(csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            for i in range(plot_historic._last_processed_count, len(paquetes)):
+                package_number = i + 1
+                varillas_count = paquetes[i]
+                writer.writerow([date_str, time_str, f"Paquete {package_number}", varillas_count])
+
+        # Update the last processed count
+        plot_historic._last_processed_count = len(paquetes)
+
+    # Check if CSV file exists, if not create it with headers
+    if not os.path.exists(csv_filename):
+        with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['Fecha', 'Hora', 'Paquete', 'Cantidad_Varillas'])
+
     # If the logo has an alpha channel, convert it to BGR
     if logo.shape[2] == 4:
         logo = cv2.cvtColor(logo, cv2.COLOR_BGRA2BGR)  # Remove alpha channel

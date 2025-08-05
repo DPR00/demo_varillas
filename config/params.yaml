@@ -2,12 +2,12 @@
 
 # Configuraciones basicas
 app_name: "Contador de varillas - IA+TECH"
-version: test_operation_1920x1080_hoyy
-debug_mode: True
+version: test_operation_1920x1080_080425
+debug_mode: False
 generate_video: False
 storage_data: False
 
-model: "contador_yolo11n_270725_best.pt"
+model: "contador_yolo11n_040825.pt"
 # input_video: "rtsp://admin:Hik12345@192.168.18.5/Straming/channels/101"
 input_video: "operation_1920x1080.mp4"
 logo: "LOGO_CE.png"
@@ -32,7 +32,7 @@ camera:
   # counter_end: 960
   # counter_line: 800
   x_init: 600
-  y_init: 300
+  y_init: 280
   roi_width: 600
   roi_height: 800
   plot_x_offset: 300
@@ -50,7 +50,7 @@ tracker:
   min_confidence: 0.8
 
 actuator:
-  x_offset: 130
+  x_offset: 50
   y_limit: 700
   y_init: 35
   y_finish: 560

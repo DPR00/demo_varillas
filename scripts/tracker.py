@@ -223,19 +223,23 @@ class Tracker:
                     self.rod_count += 1
                     self.counted_track_ids.add(track_id)
 
-    def update_params(self, track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids):
-        self.track_id = track_id
-        self.tracking_objects = tracking_objects
-        self.rods_zone_init_prev, self.rods_zone_tracking_prev, self.rods_zone_end_prev = self._zone_rods(center_points_prev_frame)
-        self.rod_count = rod_count
-        self.counted_track_ids = counted_track_ids
+    def update_params(self, tracker_data):
+        self.track_id = tracker_data['track_id']
+        self.tracking_objects = tracker_data['tracking_objects']
+        self.rods_zone_init_prev, self.rods_zone_tracking_prev, self.rods_zone_end_prev = self._zone_rods(tracker_data['center_points_prev_frame'])
+        self.rod_count = tracker_data['rod_count']
+        self.counted_track_ids = tracker_data['counted_track_ids']
 
     def track(self) -> Tuple[int, Dict[int, Rod], List[Rod]]:
         """
         Performs object tracking by associating current detections with existing tracks.
         """
         if self.direction == 0:
-            return self.track_id, self.tracking_objects, deepcopy(self.rods_cur_frame), self.rod_count, self.counted_track_ids
+            return {'track_id': self.track_id,
+                    'tracking_objects': self.tracking_objects,
+                    'center_points_prev_frame': deepcopy(self.rods_cur_frame),
+                    'rod_count': self.rod_count,
+                    'counted_track_ids': self.counted_track_ids}
 
         if self.direction == 1:
             self._log(f"{self.tracking_objects}", 0, 20*14)
@@ -243,7 +247,11 @@ class Tracker:
             # 1. If no objects are being tracked, initialize new tracks and exit.
             if not self.tracking_objects:
                 self._initialize_new_tracks()
-                return self.track_id, self.tracking_objects, deepcopy(self.rods_cur_frame), self.rod_count, self.counted_track_ids
+                return {'track_id': self.track_id,
+                        'tracking_objects': self.tracking_objects,
+                        'center_points_prev_frame': deepcopy(self.rods_cur_frame),
+                        'rod_count': self.rod_count,
+                        'counted_track_ids': self.counted_track_ids}
 
             # Store a copy of tracks before they are modified for counting later.
             previous_tracks = deepcopy(self.tracking_objects)
@@ -264,8 +272,11 @@ class Tracker:
 
             self._count_passing_rods(previous_tracks)
 
-
-        return self.track_id, self.tracking_objects, deepcopy(self.rods_cur_frame), self.rod_count, self.counted_track_ids
+        return {'track_id': self.track_id,
+                'tracking_objects': self.tracking_objects,
+                'center_points_prev_frame': deepcopy(self.rods_cur_frame),
+                'rod_count': self.rod_count,
+                'counted_track_ids': self.counted_track_ids}
 
     def plot_count(self):
         cv2.line(self.frame, (self.cp.counter_init, 0),
