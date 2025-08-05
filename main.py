@@ -1,4 +1,4 @@
-from scripts import CameraParameters, Logger, Tracker, plot_historic, read_yaml_file, get_positions
+from scripts import CameraParameters, Logger, Tracker, plot_historic, read_yaml_file, get_positions, get_data
 import os
 from torch import cuda as t_cuda
 from torch import device as t_device
@@ -9,47 +9,12 @@ import time
 take_time = False
 
 if __name__ == "__main__":
-    current_struct_time = time.localtime()
-    timestamp_string = time.strftime("%Y-%m-%d", current_struct_time)
     # timestamp_string = time.strftime("%Y-%m-%d %H:%M:%S", current_struct_time)
     if take_time:
         start_time = time.perf_counter()
 
-    # Absolute path of the folder two levels up from the current script
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    yaml_path = os.path.join(dir_path, 'config', 'params.yaml')
-    config_data = read_yaml_file(yaml_path)
-    folders_data = config_data.get('folders')
-
-    # Get paths using os.path.join for cross-platform compatibility
-    model_path = os.path.join(dir_path, folders_data.get("models"), config_data.get("model"))
-    input_video = config_data.get("input_video")
-    if input_video and input_video.startswith("rtsp://"):
-        video_path = input_video
-    else:
-        video_path = os.path.join(dir_path, folders_data.get("media"), input_video)
-    logo_path = os.path.join(dir_path, folders_data.get("assets"), config_data.get("logo"))
-    logger_path = os.path.join(dir_path, folders_data.get("logger"), config_data.get("version"))
-    output_path = os.path.join(dir_path, folders_data.get("output"), config_data.get("version") + timestamp_string + ".mp4")
-    storage_path = os.path.join(dir_path, folders_data.get("storage"), config_data.get("version"))
-
-    # Get components data
-    cam_data = config_data.get("camera")
-    tracker_data = config_data.get("tracker")
-    actuator_data = config_data.get("actuator")
-
-    # Get individual data
-    debug = config_data.get("debug_mode")
-    generate_video = config_data.get("generate_video")
-    min_confidence = tracker_data.get("min_confidence")
-    x_init, y_init = cam_data.get("x_init"), cam_data.get("y_init")
-    roi_width, roi_height = cam_data.get("roi_width"), cam_data.get("roi_height")
-    counter_init, counter_end, counter_line = cam_data.get("counter_init"), cam_data.get("counter_end"), cam_data.get("counter_line")
-    plot_x_offset, plot_y_offset = cam_data.get("plot_x_offset"), cam_data.get("plot_y_offset")
-    act_y_init, act_y_finish = actuator_data.get("y_init"), actuator_data.get("y_finish")
-    storage_data = config_data.get("storage_data")
-
-    logo = cv2.imread(logo_path)  # Keep transparency if present
+    data = get_data(dir_path)
 
     if take_time:
         end_time = time.perf_counter()
@@ -59,16 +24,18 @@ if __name__ == "__main__":
         start_time = time.perf_counter()
 
     # Open the video file
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(data['video_path'])
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)        # Mantén solo 1 frame en el buffer
     cap.set(cv2.CAP_PROP_FPS, 30)              # Ajusta al FPS real de tu cámara
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('H','2','6','4'))  # Códec H.264
+
     # Si tu OpenCV lo soporta:
     # cap.set(cv2.CAP_PROP_RTSP_TRANSPORT, 1)    # 0=Any, 1=UDP, 2=TCP
     # cap.set(cv2.CAP_PROP_LATENCY, 0)           # Forzar latencia mínima
 
     # Check if the video file opened successfully
     if not cap.isOpened():
-        print(f"[ERROR] No se pudo abrir el video o stream: {video_path}")
+        print(f"[ERROR] No se pudo abrir el video o stream: {data['video_path']}")
         exit()
 
 
@@ -84,9 +51,9 @@ if __name__ == "__main__":
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     cam_params = CameraParameters(width, height,
-                                  x = x_init, y = y_init,
-                                  w = roi_width, h = roi_height)
-    cam_params.update_limits(counter_init, counter_end, counter_line)
+                                  x = data['x_init'], y = data['y_init'],
+                                  w = data['roi_width'], h = data['roi_height'])
+    cam_params.update_limits(data['counter_init'], data['counter_end'], data['counter_line'])
 
     # Variables
     frame_count = 0
@@ -109,7 +76,7 @@ if __name__ == "__main__":
 
         start_time = time.perf_counter()
     # Set model
-    model = YOLO(model_path)
+    model = YOLO(data['model_path'])
     device = t_device("cuda" if t_cuda.is_available() else "cpu")
     model.to(device)
 
@@ -119,15 +86,17 @@ if __name__ == "__main__":
         print(f"Set model time: {elapsed_ms:.2f}")
 
     # Video writer
-    if generate_video:
-        video_writer = cv2.VideoWriter(output_path,
-                                       cv2.VideoWriter_fourcc(*'mp4v'),
-                                       fps,
-                                       (roi_width, roi_height))
-
+    if data['generate_video']:
+        video_writer = cv2.VideoWriter(data['output_path'], \
+                                       cv2.VideoWriter_fourcc(*'mp4v'), \
+                                       fps, \
+                                       (data['roi_width'], data['roi_height']))
+        if not video_writer.isOpened():
+            print(f"[ERROR] Could not initialize video writer for {data['output_path']}")
+            data['generate_video'] = False
     # Logger
-    storage_path = storage_path if storage_data else None
-    logger = Logger(output_dir = logger_path, storage_path = storage_path)
+    storage_path = data['storage_path'] if data['storage_data'] else None
+    logger = Logger(output_dir = data['logger_path'], storage_path = storage_path)
     rod_count = 0
     counted_track_ids = set()  # Initialize the new set
 
@@ -153,7 +122,7 @@ if __name__ == "__main__":
                           cam_params.x : cam_params.x + cam_params.w]
         clean_roi_frame = roi_frame.copy()
 
-        detections = model(roi_frame, verbose=True)
+        detections = model(roi_frame, verbose=False)
 
         if take_time:
             end_time = time.perf_counter()
@@ -163,23 +132,23 @@ if __name__ == "__main__":
             start_time = time.perf_counter()
 
         if prev_size == len(list_counter):
-            plot_historic(roi_frame, list_counter, logo)
+            plot_historic(roi_frame, list_counter, data['logo'])
 
         center_points_cur_frame, actuator_pos = get_positions(detections,
-                                                              min_confidence,
-                                                              actuator_data)
+                                                              data['min_confidence'],
+                                                              data['actuator_data'])
         # cv2.circle(roi_frame, (actuator_pos[0], actuator_pos[1]), 10, (0,0,255), -1)
 
         sorted_center_points_cur_frame = sorted(center_points_cur_frame, key = lambda point: point.pos_x)
         sorted_center_points_cur_frame.reverse()
         actuator_moving = False #  actuator_pos[1]!= 0 \
-                           #and (abs(actuator_pos[1] - actuator_initial_pos[1]) > act_y_init) \
+                           #and (abs(actuator_pos[1] - actuator_initial_pos[1]) > data['act_y_init']) \
                            #and frame_count > 1
 
         # # Plot counting if actuator start moving
         # if actuator_moving:
         #     # Check if actuator finished moving
-        #     if len(tracking_objects) > 0 and actuator_pos[1] <= act_y_finish and (not counted):
+        #     if len(tracking_objects) > 0 and actuator_pos[1] <= data['act_y_finish'] and (not counted):
         #         track_id = 1
         #         # print(tracking_objects)
         #         point_max = max([point for _, point in tracking_objects.items() if point.pos_x <= actuator_pos[0]], key = lambda point : point.pos_x)
@@ -200,7 +169,7 @@ if __name__ == "__main__":
 
         if not actuator_moving:
             # print(frame_count+1, end=". ")
-            tracker = Tracker(sorted_center_points_cur_frame, roi_frame, cam_params, debug=debug)
+            tracker = Tracker(sorted_center_points_cur_frame, roi_frame, cam_params, debug=data['debug'])
             tracker.update_params(track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids)
             track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids = tracker.track()
             tracker.plot_count()
@@ -217,13 +186,13 @@ if __name__ == "__main__":
         if frame_count == 1:
             actuator_initial_pos = actuator_pos
 
-        if generate_video:
+        if data['generate_video']:
             video_writer.write(roi_frame)
 
-        if debug:
+        if data['debug']:
             logger.log(roi_frame, frame_count)
 
-        if storage_data:
+        if data['storage_data']:
             logger.save_img(clean_roi_frame, frame_count)
 
         if take_time:
@@ -243,8 +212,8 @@ if __name__ == "__main__":
             break
 
     # 6. Release resources
-    print(f"Processing complete. Video saved to {str(output_path)}")
+    # print(f"Processing complete. Video saved to {data['output_path']}")
     cap.release()
-    if generate_video:
+    if data['generate_video']:
         video_writer.release()
     cv2.destroyAllWindows()

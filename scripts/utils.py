@@ -1,7 +1,9 @@
+from tarfile import data_filter
 import cv2
 import numpy as np
-from pathlib import Path
+import time
 import yaml
+import os
 from .datatypes import Rod
 from .CamParameters import CameraParameters
 
@@ -52,6 +54,67 @@ def get_positions(detections, confidence, actuator_data):
     if len(actuator_poses)!=0:
         actuator_pos = min(actuator_poses, key=lambda item: item[1])
     return center_points_cur_frame, actuator_pos
+
+def get_data(dir_path):
+    data = {}
+
+    current_struct_time = time.localtime()
+    timestamp_string = time.strftime("%Y-%m-%d", current_struct_time)
+    # Absolute path of the folder two levels up from the current script
+    yaml_path = os.path.join(dir_path, 'config', 'params.yaml')
+    config_data = read_yaml_file(yaml_path)
+    folders_data = config_data.get('folders')
+    cam_data = config_data.get("camera")
+    tracker_data = config_data.get("tracker")
+    actuator_data = config_data.get("actuator")
+    # Get paths using os.path.join for cross-platform compatibility
+    input_video = config_data.get("input_video")
+    logo_path = os.path.join(dir_path, folders_data.get("assets"), config_data.get("logo"))
+    logger_path = os.path.join(dir_path, folders_data.get("logger"), config_data.get("version"))
+    output_path = os.path.join(dir_path, folders_data.get("output"), config_data.get("version") + timestamp_string + ".mp4")
+    storage_path = os.path.join(dir_path, folders_data.get("storage"), config_data.get("version"))
+    model_path = os.path.join(dir_path, folders_data.get("models"), config_data.get("model"))
+    if input_video and input_video.startswith("rtsp://"):
+        video_path = input_video
+    else:
+        video_path = os.path.join(dir_path, folders_data.get("media"), input_video)
+
+    debug = config_data.get("debug_mode")
+    generate_video = config_data.get("generate_video")
+    min_confidence = tracker_data.get("min_confidence")
+    x_init, y_init = cam_data.get("x_init"), cam_data.get("y_init")
+    roi_width, roi_height = cam_data.get("roi_width"), cam_data.get("roi_height")
+    counter_init, counter_end, counter_line = cam_data.get("counter_init"), cam_data.get("counter_end"), cam_data.get("counter_line")
+    plot_x_offset, plot_y_offset = cam_data.get("plot_x_offset"), cam_data.get("plot_y_offset")
+    act_y_init, act_y_finish = actuator_data.get("y_init"), actuator_data.get("y_finish")
+    storage_data = config_data.get("storage_data")
+
+    logo = cv2.imread(logo_path)
+
+    data["actuator_data"] = actuator_data
+    data["model_path"] = model_path
+    data["video_path"] = video_path
+    data["logo"] = logo
+    data["logger_path"] = logger_path
+    data["output_path"] = output_path
+    data["storage_path"] = storage_path
+    data["debug"] = debug
+    data["generate_video"] = generate_video
+    data["min_confidence"] = min_confidence
+    data["x_init"] = x_init
+    data["y_init"] = y_init
+    data["roi_width"] = roi_width
+    data["roi_height"] = roi_height
+    data["counter_init"] = counter_init
+    data["counter_end"] = counter_end
+    data["counter_line"] = counter_line
+    data["plot_x_offset"] = plot_x_offset
+    data["plot_y_offset"] = plot_y_offset
+    data["act_y_init"] = act_y_init
+    data["act_y_finish"] = act_y_finish
+    data["storage_data"] = storage_data
+
+    return data
 
 def plot_historic(main_image, list_counter, logo):
     paquetes = list_counter.copy()

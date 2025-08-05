@@ -4,12 +4,19 @@ import queue
 import time
 import numpy as np
 from ultralytics import YOLO  # pip install ultralytics
-
+from torch import cuda as t_cuda
+from torch import device as t_device
+from scripts import CameraParameters, get_data, Tracker, plot_historic, read_yaml_file, get_positions, Logger
+import os
 # ===== Configuración Global =====
-RTSP_URL = "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/Channels/101?transportmode=unicast"
-# RTSP_URL = "media/test_30_07_25_17_18pm.mp4"  # O tu URL RTSP
-MODEL_PATH = "yolov8n.pt"  # Modelo YOLOv8 preentrenado
+# RTSP_URL = "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/Channels/101?transportmode=unicast"
+
+dir_path = os.path.dirname(os.path.abspath(__file__))
+data = get_data(dir_path)
+RTSP_URL = data['video_path'] #"media/operation_1920x1080.mp4"  # O tu URL RTSP
+MODEL_PATH = data['model_path'] #"models/contador_yolo11n_030825.pt"
 BUFFER_SIZE = 1  # Tamaño del buffer para baja latencia
+WIDTH, HEIGHT = 1920, 1080
 
 # Colas para comunicación entre hilos
 raw_frame_queue = queue.Queue(maxsize=2)       # Frames sin procesar
@@ -21,18 +28,20 @@ def video_capture_thread():
     cap = cv2.VideoCapture(RTSP_URL)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, BUFFER_SIZE)
     cap.set(cv2.CAP_PROP_FPS, 30)
-    
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('H','2','6','4'))  # Códec H.264
+
     if not cap.isOpened():
         print("Error: No se pudo abrir la fuente de video")
         stop_event.set()
         return
-    
+
     print("Hilo de captura iniciado")
     while not stop_event.is_set():
         ret, frame = cap.read()
         if not ret:
             print("Error de lectura de frame")
             time.sleep(0.1)
+            # stop_event.set()
             continue
         
         # Limpiar cola si está llena para mantener solo el frame más reciente
@@ -41,57 +50,85 @@ def video_capture_thread():
                 raw_frame_queue.get_nowait()
             except queue.Empty:
                 pass
-        
+        ## DELETE THIS FOR THE REAL DEMO (THIS LINE IS ONLY TO SIMULATE 30 FPS WHEN READING A SAVED VIDEO)
+        time.sleep(0.033)
+
         raw_frame_queue.put(frame)
-    
     cap.release()
     print("Hilo de captura terminado")
 
 # ===== Hilo 2: Procesamiento con YOLO =====
 def processing_thread():
-    # Cargar modelo YOLO
+    # variables
+    frame_count = 0
+    track_id = 1
+    tracking_objects = {}
+    center_points_prev_frame = []
+    list_counter = [] # For plot historic
+    actuator_initial_pos = (0,0)
+    min_track = 0
+    prev_size = -1
+    max_key = -1
+    counted = False
+    stored_list = False
+    actuator_moving = False
+    rod_count = 0
+    counted_track_ids = set()
+
+    cam_params = CameraParameters(WIDTH, HEIGHT,
+                                  x = data['x_init'], y = data['y_init'],
+                                  w = data['roi_width'], h = data['roi_height'])
+    cam_params.update_limits(data['counter_init'], data['counter_end'], data['counter_line'])
+
     model = YOLO(MODEL_PATH)
     print(f"Modelo YOLO cargado: {MODEL_PATH}")
-    
-    # Configurar aceleración (si está disponible)
-    try:
-        model.to('cuda')  # Usar GPU si está disponible
-        print("Usando aceleración GPU")
-    except:
-        print("Usando CPU")
-    
+    device = t_device("cuda" if t_cuda.is_available() else "cpu")
+    model.to(device)
+    print(f"Usando dispositivo: {device}")
+
+    # Logger
+    storage_path = data['storage_path'] if data['storage_data'] else None
+    logger = Logger(output_dir = data['logger_path'], storage_path = storage_path)
+    roi_frame = None
     print("Hilo de procesamiento iniciado")
     while not stop_event.is_set():
         try:
             # Obtener el último frame disponible (esperar máximo 0.5s)
             frame = raw_frame_queue.get(timeout=0.5)
-            
-            # Realizar detecciones con YOLO
-            results = model(frame, verbose=False, stream=False)
-            
+
+            # ROI frame
+            roi_frame = frame[cam_params.y : cam_params.y + cam_params.h,
+                            cam_params.x : cam_params.x + cam_params.w]            # Realizar detecciones con YOLO
+            detections = model(roi_frame, verbose=False, stream=False)
+
             # Procesar resultados
-            processed_frame = frame.copy()
-            for result in results:
-                # Dibujar cajas y etiquetas
-                for box in result.boxes:
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    conf = box.conf[0].item()
-                    cls_id = int(box.cls[0])
-                    label = f"{result.names[cls_id]} {conf:.2f}"
-                    
-                    # Dibujar caja
-                    cv2.rectangle(processed_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(processed_frame, label, (x1, y1-10), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            
+            if prev_size == len(list_counter):
+                plot_historic(roi_frame, list_counter, data['logo'])
+
+            center_points_cur_frame, actuator_pos = get_positions(detections,
+                                                                data['min_confidence'],
+                                                                data['actuator_data'])
             # Limpiar cola si está llena para mantener solo el frame más reciente
             if processed_frame_queue.full():
                 try:
                     processed_frame_queue.get_nowait()
                 except queue.Empty:
                     pass
-            
-            processed_frame_queue.put(processed_frame)
+            sorted_center_points_cur_frame = sorted(center_points_cur_frame, key = lambda point: point.pos_x)
+            sorted_center_points_cur_frame.reverse()
+
+
+            tracker = Tracker(sorted_center_points_cur_frame, roi_frame, cam_params, debug=data['debug'])
+            tracker.update_params(track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids)
+            track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids = tracker.track()
+            tracker.plot_count()
+
+            if data['debug']:
+                logger.log(roi_frame, frame_count)
+            frame_count += 1
+            prev_size = len(list_counter)
+
+            processed_frame_queue.put(roi_frame)
             
         except queue.Empty:
             pass  # No hay frames disponibles, continuar
@@ -134,16 +171,16 @@ def display_thread():
         
         # Mostrar información de rendimiento
         if processed_frame is not None:
-            display_frame = cv2.resize(processed_frame, (1280, 720))
+            display_frame = processed_frame #cv2.resize(processed_frame, (1280, 720))
             
             # Mostrar FPS y estado
-            cv2.putText(display_frame, f"FPS: {fps:.1f}", (20, 40), 
+            cv2.putText(display_frame, f"FPS: {fps:.1f}", (400, 60), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
             # Mostrar tamaño de colas
-            cv2.putText(display_frame, f"Captura: {raw_frame_queue.qsize()}/2", (20, 70), 
+            cv2.putText(display_frame, f"Captura: {raw_frame_queue.qsize()}/2", (400, 90), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(display_frame, f"Procesados: {processed_frame_queue.qsize()}/2", (20, 100), 
+            cv2.putText(display_frame, f"Procesados: {processed_frame_queue.qsize()}/2", (400, 120), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
             # Mostrar frame
