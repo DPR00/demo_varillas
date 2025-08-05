@@ -139,6 +139,9 @@ def processing_thread():
             center_points_cur_frame, actuator_pos = get_positions(detections,
                                                                 data['min_confidence'],
                                                                 data['actuator_data'])
+            if actuator_pos[1] != 0 and actuator_pos[1] != 0:
+                cv2.circle(roi_frame, (actuator_pos[0], actuator_pos[1]), 10, (0,0,255), -1)
+
             # Limpiar cola si está llena para mantener solo el frame más reciente
             if processed_frame_queue.full():
                 try:
