@@ -82,7 +82,7 @@ def video_capture_thread():
             except queue.Empty:
                 pass
         ## DELETE THIS FOR THE REAL DEMO (THIS LINE IS ONLY TO SIMULATE 30 FPS WHEN READING A SAVED VIDEO)
-        time.sleep(0.033)
+        # time.sleep(0.033)
 
         raw_frame_queue.put(data_to_send)
     cap.release()
