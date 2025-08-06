@@ -11,7 +11,10 @@ class Tracker:
                  cam_params,
                  direction: int,
                  debug: bool = False):
-        self.rods_cur_frame =  center_points_cur_frame
+        sorted_points = sorted(center_points_cur_frame, key = lambda point: point.pos_x)
+        if direction == 1:
+            sorted_points.reverse()
+        self.rods_cur_frame = sorted_points
         self.frame = frame
         self.cp = cam_params
         self.direction = direction

@@ -21,8 +21,8 @@ BUFFER_SIZE = 1  # Tamaño del buffer para baja latencia
 WIDTH, HEIGHT = 1920, 1080
 
 # Colas para comunicación entre hilos
-raw_frame_queue = queue.Queue(maxsize=2)       # Frames sin procesar
-processed_frame_queue = queue.Queue(maxsize=2)  # Frames procesados con detecciones
+raw_frame_queue = queue.Queue(maxsize=4)       # Frames sin procesar
+processed_frame_queue = queue.Queue(maxsize=4)  # Frames procesados con detecciones
 stop_event = threading.Event()                 # Señal de parada para todos los hilos
 
 # ===== Hilo 1: Captura de Video =====
@@ -148,13 +148,11 @@ def processing_thread():
                     processed_frame_queue.get_nowait()
                 except queue.Empty:
                     pass
-            sorted_center_points_cur_frame = sorted(center_points_cur_frame, key = lambda point: point.pos_x)
-            sorted_center_points_cur_frame.reverse()
 
             list_counter, tracker_data, store_package, actuactor_count = handle_actuator(cam_params, actuator_pos, list_counter, tracker_data, store_package, actuactor_count)
 
             if direction != 0:
-                tracker = Tracker(sorted_center_points_cur_frame, roi_frame, cam_params, debug=data['debug'], direction=direction)
+                tracker = Tracker(center_points_cur_frame, roi_frame, cam_params, debug=data['debug'], direction=direction)
                 tracker.update_params(tracker_data)
                 tracker_data= tracker.track()
                 tracker.plot_count()
@@ -209,7 +207,7 @@ def display_thread():
         
         # Mostrar información de rendimiento
         if processed_frame is not None:
-            display_frame = processed_frame #cv2.resize(processed_frame, (1280, 720))
+            display_frame = processed_frame.copy() #cv2.resize(processed_frame, (1280, 720))
             
             # Mostrar FPS y estado
             cv2.putText(display_frame, f"FPS: {fps:.1f}", (400, 60), 

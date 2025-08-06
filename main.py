@@ -144,13 +144,12 @@ if __name__ == "__main__":
             cv2.circle(roi_frame, (actuator_pos[0], actuator_pos[1]), 10, (0,0,255), -1)
         if data['debug']:
             cv2.putText(roi_frame, f"Apos: {actuator_pos}", (50, 20*9), cam_params.font, cam_params.font_scale, cam_params.green, cam_params.font_thickness*2)
-        sorted_center_points_cur_frame = sorted(center_points_cur_frame, key = lambda point: point.pos_x)
-        sorted_center_points_cur_frame.reverse()
+
         list_counter, tracker_data, store_package, actuactor_count = handle_actuator(cam_params, actuator_pos, list_counter, tracker_data, store_package, actuactor_count)
 
         if not actuator_moving:
             # print(frame_count+1, end=". ")
-            tracker = Tracker(sorted_center_points_cur_frame, roi_frame, cam_params, debug=data['debug'], direction=direction)
+            tracker = Tracker(center_points_cur_frame, roi_frame, cam_params, debug=data['debug'], direction=direction)
             tracker.update_params(tracker_data)
             tracker_data = tracker.track()
             tracker.plot_count()
