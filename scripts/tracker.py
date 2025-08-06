@@ -299,7 +299,15 @@ class Tracker:
 
         for object_id, point in self.tracking_objects.items():
             text_pos = (point.pos_x, point.pos_y - 7)
-            cv2.putText(self.frame, str(object_id),text_pos, 0, 1,  self.cp.black, self.cp.font_thickness)
+            # Get text size to create background rectangle
+            (text_width, text_height), _ = cv2.getTextSize(str(object_id), 0, 1, self.cp.font_thickness)
+            # Draw white background rectangle
+            cv2.rectangle(self.frame,
+                         (text_pos[0] - 2, text_pos[1] - text_height - 2),
+                         (text_pos[0] + text_width + 2, text_pos[1] + 2),
+                         self.cp.white, -1)
+            # Draw black text
+            cv2.putText(self.frame, str(object_id), text_pos, 0, 1, self.cp.black, self.cp.font_thickness)
 
         text = f"Varillas: {self.rod_count}"
 
