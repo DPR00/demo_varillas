@@ -43,7 +43,6 @@ def video_capture_thread():
     try:
         ser = serial.Serial(data['serial_port'], data['serial_baud_rate'], timeout=data['serial_timeout'])
         # Dar tiempo para que el ESP32 reinicie y desechar logs de arranque
-        time.sleep(2)
         ser.reset_input_buffer()
     except serial.SerialException as e:
         print(f"Error al abrir {data['serial_port']}: {e}")
@@ -82,7 +81,7 @@ def video_capture_thread():
             except queue.Empty:
                 pass
         ## DELETE THIS FOR THE REAL DEMO (THIS LINE IS ONLY TO SIMULATE 30 FPS WHEN READING A SAVED VIDEO)
-        time.sleep(0.033)
+        # time.sleep(0.033)
 
         raw_frame_queue.put(data_to_send)
     cap.release()
@@ -120,6 +119,23 @@ def processing_thread():
     storage_path = data['storage_path'] if data['storage_data'] else None
     logger = Logger(output_dir = data['logger_path'], storage_path = storage_path)
     roi_frame = None
+
+    if data['generate_video']:
+        output_path = data['output_path']
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fps = 30.0
+        frame_size = (data['roi_width'], data['roi_height'])
+        video_writer = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
+        
+        if not video_writer.isOpened():
+            print(f"[ERROR] Could not initialize video writer for {output_path}")
+            video_writer = None
+        else:
+            print(f"Video writer initialized: {output_path} at {fps} FPS, size {frame_size}")
+    
+
+
     print("Hilo de procesamiento iniciado")
     while not stop_event.is_set():
         try:
@@ -164,6 +180,17 @@ def processing_thread():
             frame_count += 1
             prev_size = len(list_counter)
 
+            # Escribir en video si está habilitado
+            if video_writer is not None:
+                video_writer.write(roi_frame.copy())
+            
+            # Limpiar cola si está llena
+            if processed_frame_queue.full():
+                try:
+                    processed_frame_queue.get_nowait()
+                except queue.Empty:
+                    pass
+
             processed_frame_queue.put(roi_frame)
             
         except queue.Empty:
@@ -171,6 +198,10 @@ def processing_thread():
         except Exception as e:
             print(f"Error en procesamiento: {str(e)}")
     
+    # Liberar recursos al terminar
+    if video_writer is not None:
+        video_writer.release()
+        print("Video writer released")
     print("Hilo de procesamiento terminado")
 
 # ===== Hilo 3: Visualización =====
