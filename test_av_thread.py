@@ -46,24 +46,66 @@ raw_frame_queue = queue.Queue(maxsize=2)       # Frames sin procesar
 processed_frame_queue = queue.Queue(maxsize=2)  # Frames procesados con detecciones
 stop_event = threading.Event()                 # Señal de parada para todos los hilos
 
+SERIAL_PORT = 'COM3'  # Linux: '/dev/ttyUSB0', Windows: 'COM3'
+BAUD_RATE = 115200
+TIMEOUT = 1  # segundos
+
+data['flow_data'] = dict(serial_counter=0, direction=1, direction_raw="", frame=None, direction_time=0, frame_time=0)
+
+def read_serial_thread(data_params: dict):
+    try:
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=TIMEOUT)
+    except serial.SerialException as e:
+        print(f"Error al abrir {SERIAL_PORT}: {e}")
+        return
+
+    # Dar tiempo para que el ESP32 reinicie y desechar logs de arranque
+    time.sleep(2)
+    ser.reset_input_buffer()
+
+    print(f"Leyendo bits desde {SERIAL_PORT} a {BAUD_RATE} baudios...")
+    serial_data = dict()
+    direction = 1
+    try:
+        while not stop_event.is_set():
+            raw = ser.readline()
+            if not raw:
+                continue
+            try:
+                line = raw.decode('utf-8').strip()
+            except UnicodeDecodeError:
+                continue
+
+            # Si la línea consiste en exactamente 4 caracteres de '0' o '1', la mostramos
+            if len(line) == 2 and all(c in '01' for c in line):
+                if line == '01':
+                    direction = -1
+                elif line == '11':
+                    direction = 0
+                else:
+                    direction = 1 # Default direction
+            # En otro caso, simplemente ignoramos la línea
+            serial_data['direction'] = direction
+            serial_data['direction_raw'] = line
+            serial_data['direction_time'] = time.time()
+            data_params['flow_data'].update(**serial_data)
+            data_params['flow_data']['serial_counter'] = data_params['flow_data'].get("serial_counter", 0) + 1
+            # print(f"raw: {line}, direction: {direction}, time={serial_data['direction_time']}")
+
+    except KeyboardInterrupt:
+        print("Deteniendo lectura...")
+    finally:
+        ser.close()
+
 # ===== Hilo 1: Captura de Video con PyAV y Serial =====
-def video_capture_thread():
+def video_capture_thread(data_params: dict):
     print("Hilo de captura iniciado (PyAV)")
     last_frame = None
     last_direction = 1  # Dirección por defecto (izquierda a derecha)
     raw_data_motor = b''
     
-    # Configuración inicial del puerto serial
-    try:
-        ser = serial.Serial(data['serial_port'], data['serial_baud_rate'], timeout=data['serial_timeout'])
-        time.sleep(2)  # Tiempo para que el ESP32 se reinicie
-        ser.reset_input_buffer()
-        print(f"Conexión serial establecida: {data['serial_port']}")
-    except serial.SerialException as e:
-        print(f"Error al abrir {data['serial_port']}: {e}")
-        ser = None
-    
     while not stop_event.is_set():
+        data_to_send = {}
         try:
             # Abrir el stream con PyAV
             container = av.open(RTSP_URL, options=FFMPEG_OPTIONS)
@@ -83,102 +125,68 @@ def video_capture_thread():
                     last_frame = img
                     
                     # Leer datos del puerto serial
-                    if ser and ser.in_waiting > 0:
-                        try:
-                            raw_data_motor = ser.readline()
-                            line = raw_data_motor.decode('utf-8').strip()
-                            if len(line) == 2 and all(c in '01' for c in line):
-                                if line == '10':
-                                    last_direction = -1
-                                elif line == '00':
-                                    last_direction = 0
-                                else:
-                                    last_direction = 1  # Valor por defecto
-                        except Exception as e:
-                            print(f"Error en serial: {e}")
+                    
                     
                     # Limpiar cola si está llena para mantener solo el frame más reciente
-                    if raw_frame_queue.full():
-                        try:
-                            raw_frame_queue.get_nowait()
-                        except queue.Empty:
-                            pass
+                    # if raw_frame_queue.full():
+                    #     try:
+                    #         raw_frame_queue.get_nowait()
+                    #     except queue.Empty:
+                    #         pass
                     
-                    # Enviar frame y dirección
-                    raw_frame_queue.put({
-                        'frame': img,
-                        'direction': last_direction
-                    })
+                    # # Enviar frame y dirección
+                    # raw_frame_queue.put({
+                    #     'frame': img,
+                    #     'direction': last_direction
+                    # })
+                    data_params['flow_data']["frame"] = last_frame.copy()
+                    data_params['flow_data']["frame_time"] = time.time()
+                    data_params['flow_data']['serial_counter'] = 0
         
         except FFmpegError as e:
             print(f"Error de conexión (PyAV): {e}")
-            # Leer datos del puerto serial durante la reconexión
-            if ser and ser.in_waiting > 0:
-                try:
-                    raw_data_motor = ser.readline()
-                    line = raw_data_motor.decode('utf-8').strip()
-                    if len(line) == 2 and all(c in '01' for c in line):
-                        if line == '10':
-                            last_direction = -1
-                        elif line == '00':
-                            last_direction = 0
-                        else:
-                            last_direction = 1
-                except Exception as e:
-                    print(f"Error en serial durante reconexión: {e}")
             
             # Mostrar último frame durante la reconexión
             if last_frame is not None:
-                if raw_frame_queue.full():
-                    try:
-                        raw_frame_queue.get_nowait()
-                    except queue.Empty:
-                        pass
-                raw_frame_queue.put({
-                    'frame': last_frame.copy(),
-                    'direction': last_direction
-                })
+                # if raw_frame_queue.full():
+                #     try:
+                #         raw_frame_queue.get_nowait()
+                #     except queue.Empty:
+                #         pass
+                # raw_frame_queue.put({
+                #     'frame': last_frame.copy(),
+                #     'direction': last_direction
+                # })
+                data_params['flow_data']["frame"] = last_frame.copy()
+                data_params['flow_data']["frame_time"] = time.time()
             print("Reintentando conexión en 2 segundos...")
             time.sleep(2)
             
         except Exception as e:
             print(f"Error inesperado en captura (PyAV): {e}")
             # Leer datos del puerto serial durante la reconexión
-            if ser and ser.in_waiting > 0:
-                try:
-                    raw_data_motor = ser.readline()
-                    line = raw_data_motor.decode('utf-8').strip()
-                    if len(line) == 2 and all(c in '01' for c in line):
-                        if line == '10':
-                            last_direction = -1
-                        elif line == '00':
-                            last_direction = 0
-                        else:
-                            last_direction = 1
-                except Exception as e:
-                    print(f"Error en serial durante reconexión: {e}")
+            
             
             # Mostrar último frame durante la reconexión
             if last_frame is not None:
-                if raw_frame_queue.full():
-                    try:
-                        raw_frame_queue.get_nowait()
-                    except queue.Empty:
-                        pass
-                raw_frame_queue.put({
-                    'frame': last_frame.copy(),
-                    'direction': last_direction
-                })
+                # if raw_frame_queue.full():
+                #     try:
+                #         raw_frame_queue.get_nowait()
+                #     except queue.Empty:
+                #         pass
+                # raw_frame_queue.put({
+                #     'frame': last_frame.copy(),
+                #     'direction': last_direction
+                # })
+                data_params['flow_data']["frame"] = last_frame.copy()
+                data_params['flow_data']["frame_time"] = time.time()
             print("Reintentando conexión en 5 segundos...")
             time.sleep(5)
     
-    # Cerrar conexión serial al terminar
-    if ser and ser.is_open:
-        ser.close()
     print("Hilo de captura terminado")
 
 # ===== Hilo 2: Procesamiento con YOLO y Actuador =====
-def processing_thread():
+def processing_thread(data_params: dict):
     # Inicializar variables de seguimiento
     tracker_data = {
         'track_id': 1,
@@ -228,13 +236,21 @@ def processing_thread():
             print(f"Video writer initialized: {output_path} at {fps} FPS, size {frame_size}")
     
     print("Hilo de procesamiento iniciado")
+    last_time_processed = 0
     while not stop_event.is_set():
         try:
             # Obtener frame y dirección
-            data_received = raw_frame_queue.get(timeout=0.5)
-            full_frame = data_received['frame']
-            direction = data_received['direction']
-
+            # data_received = raw_frame_queue.get(timeout=0.5)
+            if last_time_processed >= data_params['flow_data']['frame_time'] or data_params['flow_data']['frame'] is None:
+                time.sleep(0.0)
+                continue
+            
+            full_frame = data_params['flow_data']['frame']
+            direction = data_params['flow_data']['direction']
+            direction_raw = data_params['flow_data']['direction_raw']
+            direction_time = data_params['flow_data']['direction_time']
+            serial_counter = data_params['flow_data']['serial_counter']
+            print(f"direction: {direction}, direction_raw: {direction_raw}, time={direction_time}, serial_counter: {serial_counter}")
             # Recortar ROI
             roi_frame = full_frame[
                 cam_params.y : cam_params.y + cam_params.h,
@@ -392,9 +408,10 @@ def display_thread():
 def main():
     # Crear e iniciar hilos
     threads = [
-        threading.Thread(target=video_capture_thread, daemon=True),
-        threading.Thread(target=processing_thread, daemon=True),
-        threading.Thread(target=display_thread, daemon=True)
+        threading.Thread(target=video_capture_thread, args=(data,), daemon=True),
+        threading.Thread(target=processing_thread, args=(data,), daemon=True),
+        threading.Thread(target=display_thread, daemon=True),
+        threading.Thread(target=read_serial_thread, args=(data,), daemon=True),
     ]
     
     for t in threads:

@@ -21,12 +21,63 @@ BUFFER_SIZE = 1  # Tamaño del buffer para baja latencia
 WIDTH, HEIGHT = 1920, 1080
 
 # Colas para comunicación entre hilos
-raw_frame_queue = queue.Queue(maxsize=4)       # Frames sin procesar
+raw_frame_queue:queue.Queue[dict] = queue.Queue(maxsize=4)       # Frames sin procesar
 processed_frame_queue = queue.Queue(maxsize=4)  # Frames procesados con detecciones
 stop_event = threading.Event()                 # Señal de parada para todos los hilos
 
+SERIAL_PORT = 'COM3'  # Linux: '/dev/ttyUSB0', Windows: 'COM3'
+BAUD_RATE = 115200
+TIMEOUT = 1  # segundos
+
+data['serial_data'] = dict()
+
+def read_serial_thread(data_params: dict):
+    try:
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=TIMEOUT)
+    except serial.SerialException as e:
+        print(f"Error al abrir {SERIAL_PORT}: {e}")
+        return
+
+    # Dar tiempo para que el ESP32 reinicie y desechar logs de arranque
+    time.sleep(2)
+    ser.reset_input_buffer()
+
+    print(f"Leyendo bits desde {SERIAL_PORT} a {BAUD_RATE} baudios...")
+    serial_data = dict()
+    direction = 1
+    try:
+        while not stop_event.is_set():
+            raw = ser.readline()
+            if not raw:
+                continue
+            try:
+                line = raw.decode('utf-8').strip()
+            except UnicodeDecodeError:
+                continue
+
+            # Si la línea consiste en exactamente 4 caracteres de '0' o '1', la mostramos
+            if len(line) == 2 and all(c in '01' for c in line):
+                if line == '01':
+                    direction = -1
+                elif line == '11':
+                    direction = 0
+                else:
+                    direction = 1 # Default direction
+            # En otro caso, simplemente ignoramos la línea
+            serial_data['direction'] = direction
+            serial_data['direction_raw'] = line
+            serial_data['direction_time'] = time.time()
+            serial_data['counter'] = data_params['serial_data']['counter'] = data_params['serial_data'].get("counter", 0) + 1
+            data_params['serial_data'] = serial_data
+            # print(f"raw: {line}, direction: {direction}, time={serial_data['direction_time']}")
+
+    except KeyboardInterrupt:
+        print("Deteniendo lectura...")
+    finally:
+        ser.close()
+
 # ===== Hilo 1: Captura de Video =====
-def video_capture_thread():
+def video_capture_thread(data_params: dict):
     cap = cv2.VideoCapture(RTSP_URL)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, BUFFER_SIZE)
     cap.set(cv2.CAP_PROP_FPS, 30)
@@ -38,14 +89,6 @@ def video_capture_thread():
         return
 
     data_to_send = {}
-    raw_data_motor = 1
-    direction = 1 # Default direction
-    try:
-        ser = serial.Serial(data['serial_port'], data['serial_baud_rate'], timeout=data['serial_timeout'])
-        # Dar tiempo para que el ESP32 reinicie y desechar logs de arranque
-        ser.reset_input_buffer()
-    except serial.SerialException as e:
-        print(f"Error al abrir {data['serial_port']}: {e}")
 
     print("Hilo de captura iniciado")
     while not stop_event.is_set():
@@ -56,23 +99,10 @@ def video_capture_thread():
             # stop_event.set()
             continue
 
-        try:
-            raw_data_motor = ser.readline()
-            if raw_data_motor:
-                line = raw_data_motor.decode('utf-8').strip()
-                # Si la línea consiste en exactamente 4 caracteres de '0' o '1', la mostramos
-                if len(line) == 2 and all(c in '01' for c in line):
-                    if line == '10':
-                        direction = -1
-                    elif line == '00':
-                        direction = 0
-                    else:
-                        direction = 1 # Default direction
-        except:
-            print(f"Error en serial. Línea a decodificar: {raw_data_motor}")
-
-        data_to_send['direction'] = direction
+        data_to_send.update(**data_params['serial_data'])
+        data_params['serial_data']['counter'] = 0
         data_to_send['frame'] = frame
+        data_to_send['frame_time'] = time.time()
 
         # Limpiar cola si está llena para mantener solo el frame más reciente
         if raw_frame_queue.full():
@@ -87,8 +117,10 @@ def video_capture_thread():
     cap.release()
     print("Hilo de captura terminado")
 
+DELAY_STOP_DIRECTION = 1.5 # segundos
+
 # ===== Hilo 2: Procesamiento con YOLO =====
-def processing_thread():
+def processing_thread(data_params: dict):
     # variables
     frame_count = 0
     tracker_data = {'track_id': 1,
@@ -137,12 +169,28 @@ def processing_thread():
 
 
     print("Hilo de procesamiento iniciado")
+    prev_stop_direction = 1
+    init_stop = 0
+    last_direction = 1
     while not stop_event.is_set():
         try:
             # Obtener el último frame disponible (esperar máximo 0.5s)
             data_received = raw_frame_queue.get(timeout=0.5)
+            if data_received is None:
+                continue
+            
             frame = data_received['frame']
             direction = data_received['direction']
+            curr_time = time.time()
+            if direction == 0:
+                if last_direction != direction:
+                    init_stop = curr_time
+                    prev_stop_direction = last_direction
+                if curr_time - init_stop < DELAY_STOP_DIRECTION:
+                    direction = prev_stop_direction
+            last_direction = data_received['direction']
+            with_delay = direction != data_received['direction']
+            print(f"direction: {data_received['direction']}, direction_raw: {data_received['direction_raw']}, time={data_received['direction_time']}, counter: {data_received['counter']}, delay: {with_delay}")
             # ROI frame
             roi_frame = frame[cam_params.y : cam_params.y + cam_params.h,
                             cam_params.x : cam_params.x + cam_params.w]            # Realizar detecciones con YOLO
@@ -264,11 +312,13 @@ def display_thread():
 
 # ===== Función Principal =====
 def main():
+    global data
     # Crear e iniciar hilos
     threads = [
-        threading.Thread(target=video_capture_thread, daemon=True),
-        threading.Thread(target=processing_thread, daemon=True),
-        threading.Thread(target=display_thread, daemon=True)
+        threading.Thread(target=video_capture_thread, args=(data,), daemon=True),
+        threading.Thread(target=processing_thread, args=(data,), daemon=True),
+        threading.Thread(target=display_thread, daemon=True),
+        threading.Thread(target=read_serial_thread, args=(data,), daemon=True),
     ]
     
     for t in threads:
@@ -280,6 +330,11 @@ def main():
             time.sleep(0.5)
     except KeyboardInterrupt:
         stop_event.set()
+    
+    print("Sistema terminando...")
+
+    for t in threads:
+        t.join()
     
     print("Sistema terminado")
 

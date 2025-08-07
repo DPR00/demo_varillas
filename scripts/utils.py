@@ -60,7 +60,7 @@ def get_data(dir_path):
     data = {}
 
     current_struct_time = time.localtime()
-    timestamp_string = time.strftime("%Y-%m-%d", current_struct_time)
+    timestamp_string = time.strftime("%Y-%m-%dT%H_%M_%S", current_struct_time)
     # Absolute path of the folder two levels up from the current script
     yaml_path = os.path.join(dir_path, 'config', 'params.yaml')
     config_data = read_yaml_file(yaml_path)
