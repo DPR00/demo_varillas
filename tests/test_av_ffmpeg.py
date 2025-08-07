@@ -7,9 +7,9 @@ import time
 from av.error import FFmpegError
 
 # Configuración de la cámara
-# RTSP_URL = "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/Channels/101"
+RTSP_URL = "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/Channels/101"
 # RTSP_URL = "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/Channels/101?transportmode=unicast"
-RTSP_URL = "media/test_30_07_25_17_18pm.mp4"
+# RTSP_URL = "media/test_30_07_25_17_18pm.mp4"
 
 # Opciones optimizadas para conexiones inestables
 FFMPEG_OPTIONS = {

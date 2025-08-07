@@ -8,8 +8,8 @@ generate_video: True
 storage_data: False
 
 model: "contador_yolo11n_040825.pt"
-# input_video: "rtsp://admin:Hik12345@192.168.18.5/Streaming/channels/101?transportmode=unicast"
-input_video: "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/channels/101?transportmode=unicast"
+input_video: "rtsp://admin:Hik12345@192.168.18.5/Streaming/channels/101?transportmode=unicast"
+# input_video: "rtsp://admin:IA+T3cCAM@192.168.18.3/Streaming/channels/101"
 # input_video: "operation_1920x1080.mp4"
 logo: "LOGO_CE.png"
 
@@ -32,6 +32,7 @@ camera:
   # counter_init: 300
   # counter_end: 960
   # counter_line: 800
+  # x_init: 650
   x_init: 600
   y_init: 280
   roi_width: 600
