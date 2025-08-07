@@ -1,4 +1,4 @@
-from scripts import CameraParameters, Logger, Tracker, plot_historic, read_yaml_file, get_positions, get_data
+from scripts import CameraParameters, Logger, Tracker, plot_historic, get_positions, get_data, handle_actuator
 import os
 from torch import cuda as t_cuda
 from torch import device as t_device
@@ -57,17 +57,18 @@ if __name__ == "__main__":
 
     # Variables
     frame_count = 0
-    track_id = 1
-    tracking_objects = {}
-    center_points_prev_frame = []
+    tracker_data = {'track_id': 1,
+                    'tracking_objects': {},
+                    'rod_count': 0,
+                    'counted_track_ids': set(),
+                    'center_points_prev_frame': []}
     list_counter = [] # For plot historic
     actuator_initial_pos = (0,0)
-    min_track = 0
     prev_size = -1
-    max_key = -1
-    counted = False
-    stored_list = False
     actuator_moving = False
+    store_package = False
+    direction = 1 # 1: left to right (Default), 0: stop, -1: right to left
+    actuactor_count = 0
 
     if take_time:
         end_time = time.perf_counter()
@@ -97,13 +98,14 @@ if __name__ == "__main__":
     # Logger
     storage_path = data['storage_path'] if data['storage_data'] else None
     logger = Logger(output_dir = data['logger_path'], storage_path = storage_path)
-    rod_count = 0
-    counted_track_ids = set()  # Initialize the new set
 
     while cap.isOpened():
         if take_time:
             print(f"---------- Frame: {frame_count} ------------------")
             start_time_global = time.perf_counter()
+
+        if cv2.waitKey(1) & 0xFF == ord('p'):  # Press 'q' to exit
+            actuator_moving = not actuator_moving
 
         success, frame = cap.read()
 
@@ -137,45 +139,24 @@ if __name__ == "__main__":
         center_points_cur_frame, actuator_pos = get_positions(detections,
                                                               data['min_confidence'],
                                                               data['actuator_data'])
-        # cv2.circle(roi_frame, (actuator_pos[0], actuator_pos[1]), 10, (0,0,255), -1)
 
-        sorted_center_points_cur_frame = sorted(center_points_cur_frame, key = lambda point: point.pos_x)
-        sorted_center_points_cur_frame.reverse()
-        actuator_moving = False #  actuator_pos[1]!= 0 \
-                           #and (abs(actuator_pos[1] - actuator_initial_pos[1]) > data['act_y_init']) \
-                           #and frame_count > 1
+        if actuator_pos[1] != 0 and actuator_pos[1] != 0:
+            cv2.circle(roi_frame, (actuator_pos[0], actuator_pos[1]), 10, (0,0,255), -1)
+        if data['debug']:
+            cv2.putText(roi_frame, f"Apos: {actuator_pos}", (50, 20*9), cam_params.font, cam_params.font_scale, cam_params.green, cam_params.font_thickness*2)
 
-        # # Plot counting if actuator start moving
-        # if actuator_moving:
-        #     # Check if actuator finished moving
-        #     if len(tracking_objects) > 0 and actuator_pos[1] <= data['act_y_finish'] and (not counted):
-        #         track_id = 1
-        #         # print(tracking_objects)
-        #         point_max = max([point for _, point in tracking_objects.items() if point.pos_x <= actuator_pos[0]], key = lambda point : point.pos_x)
-        #         # print(point_max, actuator_pos[0])
-        #         max_key = point_max.track_id
-        #         counted = True
-
-        #     if (max_key != -1):
-        #         cv2.putText(roi_frame, "Ingresaron " + str(max_key) + " varillas",
-        #                     (int(cam_params.w//2 - plot_x_offset), int(cam_params.y//2 + plot_y_offset)),
-        #                     cam_params.font, cam_params.font_scale*3, cam_params.text_color, cam_params.font_thickness*2)
-        #         if not stored_list:
-        #             list_counter.append(max_key)
-        #             stored_list = True
-        # else:
-        #     stored_list = False
-        #     counted = False
+        list_counter, tracker_data, store_package, actuactor_count = handle_actuator(cam_params, actuator_pos, list_counter, tracker_data, store_package, actuactor_count)
 
         if not actuator_moving:
             # print(frame_count+1, end=". ")
-            tracker = Tracker(sorted_center_points_cur_frame, roi_frame, cam_params, debug=data['debug'])
-            tracker.update_params(track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids)
-            track_id, tracking_objects, center_points_prev_frame, rod_count, counted_track_ids = tracker.track()
+            tracker = Tracker(center_points_cur_frame, roi_frame, cam_params, debug=data['debug'], direction=direction)
+            tracker.update_params(tracker_data)
+            tracker_data = tracker.track()
             tracker.plot_count()
+            store_package = False
+            actuactor_count = 0
 
         if take_time:
-
             end_time = time.perf_counter()
             elapsed_ms = (end_time - start_time)*1000
             print(f"Post processing time: {elapsed_ms:.2f} ms.")
@@ -212,8 +193,8 @@ if __name__ == "__main__":
             break
 
     # 6. Release resources
-    # print(f"Processing complete. Video saved to {data['output_path']}")
     cap.release()
     if data['generate_video']:
+        print(f"Processing complete. Video saved to {data['output_path']}")
         video_writer.release()
     cv2.destroyAllWindows()

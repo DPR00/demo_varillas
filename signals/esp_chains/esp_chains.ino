@@ -2,7 +2,7 @@
 
 // Definición de pines (ajusta según tu hardware)
 // const int inputPins[4] = { 12, 14, 27, 26 };
-const int inputPins[2] = { 27, 26 };
+const int inputPins[2] = { 26, 27 };
 
 void setup() {
   // Inicializa comunicación serial a 115200 baudios
@@ -26,5 +26,5 @@ void loop() {
   }
 
   Serial.println(bitString);
-  delay(100); // Ajusta la frecuencia de envío (100 ms aquí)
+  delay(10); // Ajusta la frecuencia de envío (10 ms aquí)
 }

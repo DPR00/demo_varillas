@@ -3,26 +3,54 @@ from PIL import Image
 import shutil
 
 # --- Configuration ---
-# Define the dimensions and crop coordinates
+# Define the dimensions
 ORIG_W, ORIG_H = 3840, 2160
-CROP_W, CROP_H = 1548, 1105
+CROP_W, CROP_H = 600, 800
 
-# The (x, y) coordinates for the top-left corner of each of the 6 crops
-CROP_COORDS = [
-    (0, 0),         # Top-left
-    (1146, 0),      # Top-middle
-    (2292, 0),      # Top-right
-    (0, 1055),      # Bottom-left
-    (1146, 1055),   # Bottom-middle
-    (2292, 1055)    # Bottom-right
-]
+def generate_crop_coordinates(orig_width, orig_height, crop_width, crop_height):
+    """
+    Automatically generate crop coordinates to cover the entire original image.
+
+    Args:
+        orig_width (int): Original image width
+        orig_height (int): Original image height
+        crop_width (int): Width of each crop
+        crop_height (int): Height of each crop
+
+    Returns:
+        list: List of (x, y) coordinates for crop top-left corners
+    """
+    coordinates = []
+
+    # Calculate how many crops fit horizontally and vertically
+    num_cols = (orig_width + crop_width - 1) // crop_width  # Ceiling division
+    num_rows = (orig_height + crop_height - 1) // crop_height  # Ceiling division
+
+    print(f"📐 Generating {num_cols}×{num_rows} grid of crops ({num_cols * num_rows} total)")
+    print(f"   Original: {orig_width}×{orig_height}")
+    print(f"   Crop size: {crop_width}×{crop_height}")
+
+    # Generate coordinates for each crop
+    for row in range(num_rows):
+        for col in range(num_cols):
+            x = col * crop_width
+            y = row * crop_height
+            # Ensure we don't exceed original dimensions
+            if x <= orig_width and y <= orig_height:
+                coordinates.append((x, y))
+
+    print(f"   Generated {len(coordinates)} crop coordinates")
+    return coordinates
+
+# Generate crop coordinates automatically
+CROP_COORDS = generate_crop_coordinates(ORIG_W, ORIG_H, CROP_W, CROP_H)
 
 # Base folder names
-SOURCE_IMG_DIR = 'images'
-SOURCE_LBL_DIR = 'labels'
-DEST_IMG_DIR = 'images_rs'
-DEST_LBL_DIR = 'labels_rs'
-EMPTY_IMG_DIR = 'empty_images_rs' # New folder for images without labels
+SOURCE_IMG_DIR = 'old_images_original/images'
+SOURCE_LBL_DIR = 'old_images_original/labels'
+DEST_IMG_DIR = 'images'
+DEST_LBL_DIR = 'labels'
+EMPTY_IMG_DIR = 'dataset/empty_images' # New folder for images without labels
 
 
 def process_and_tile_dataset(source_directory):

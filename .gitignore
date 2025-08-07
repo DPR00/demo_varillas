@@ -8,3 +8,4 @@ models/
 output/
 runs/
 storage/
+*.csv
