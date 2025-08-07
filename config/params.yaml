@@ -2,8 +2,8 @@
 
 # Configuraciones basicas
 app_name: "Contador de varillas - IA+TECH"
-version: test_operation_1920x1080_080425
-debug_mode: False
+version: test_forward_backwards_080525_main
+debug_mode: True
 generate_video: False
 storage_data: False
 
@@ -47,7 +47,7 @@ serial:
   timeout: 1
 
 tracker:
-  min_confidence: 0.8
+  min_confidence: 0.75
 
 actuator:
   x_offset: 50
